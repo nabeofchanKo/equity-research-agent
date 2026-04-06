@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "moomoo_server": {
+      "command": "python",
+      "args": ["mcp_servers/moomoo_server/server.py"],
+      "env": {
+        "MOOMOO_HOST": "127.0.0.1",
+        "MOOMOO_PORT": "11111"
+      }
+    },
+    "financials_server": {
+      "command": "python",
+      "args": ["mcp_servers/financials_server/server.py"]
+    },
+    "news_sentiment_server": {
+      "command": "python",
+      "args": ["mcp_servers/news_sentiment_server/server.py"]
+    }
+  }
+}

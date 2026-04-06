@@ -1,0 +1,24 @@
+# MooMoo API
+moomoo-api>=9.6
+
+# Data & Analysis
+pandas>=2.0
+numpy>=1.24
+yfinance>=0.2.30
+
+# Charts & Reports
+plotly>=5.18
+jinja2>=3.1
+kaleido>=0.2  # Plotly static image export
+
+# MCP Server
+mcp>=1.0
+
+# Utilities
+pyyaml>=6.0
+requests>=2.31
+python-dateutil>=2.8
+
+# Testing
+pytest>=7.4
+pytest-cov>=4.1

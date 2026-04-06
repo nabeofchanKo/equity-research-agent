@@ -1,0 +1,47 @@
+# moomoo-dashboard configuration
+
+moomoo:
+  host: "127.0.0.1"
+  port: 11111
+  market: "US"           # US, HK, CN
+  default_kline_days: 180
+  default_kline_type: "K_DAY"
+
+report:
+  output_dir: "outputs"
+  chart_theme: "plotly_white"
+  include_sections:
+    - header
+    - price_chart
+    - technical_indicators
+    - fundamentals
+    - sector_comparison
+    - performance_benchmark
+    - sentiment_news
+
+technical:
+  sma_periods: [20, 50, 200]
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bollinger_period: 20
+  bollinger_std: 2
+
+performance:
+  benchmark_indices:
+    - "US.SPY"      # S&P 500
+    - "US.QQQ"      # NASDAQ 100
+  comparison_periods:
+    - label: "1M"
+      days: 30
+    - label: "3M"
+      days: 90
+    - label: "6M"
+      days: 180
+    - label: "1Y"
+      days: 365
+
+sentiment:
+  max_articles: 10
+  lookback_days: 7
