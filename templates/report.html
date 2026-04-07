@@ -1,11 +1,922 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>{{ ticker }} - Equity Research Report</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ ticker }} — Equity Research · {{ date }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <style>
+    /* ── Reset & Root ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:          #0a0e1a;
+      --bg2:         #0d1220;
+      --card:        #111827;
+      --elevated:    #1a2235;
+      --border:      rgba(99,120,168,0.14);
+      --border-hi:   rgba(99,120,168,0.28);
+      --text:        #e8edf5;
+      --text-sec:    #a0b0cc;
+      --muted:       #8b9dc3;
+      --dim:         #4a5a78;
+      --green:       #00d68f;
+      --green-bg:    rgba(0,214,143,0.09);
+      --green-glow:  rgba(0,214,143,0.22);
+      --red:         #ff3d71;
+      --red-bg:      rgba(255,61,113,0.09);
+      --blue:        #3d8bff;
+      --blue-bg:     rgba(61,139,255,0.09);
+      --yellow:      #ffb700;
+      --yellow-bg:   rgba(255,183,0,0.09);
+      --purple:      #a855f7;
+      --radius:      12px;
+      --radius-sm:   8px;
+      --shadow:      0 4px 24px rgba(0,0,0,0.5);
+      --shadow-card: 0 2px 16px rgba(0,0,0,0.4);
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13.5px;
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    code, .mono {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Layout ────────────────────────────────────────────────────────────── */
+    .wrap       { max-width: 1380px; margin: 0 auto; padding: 0 20px; }
+    .section    { padding: 28px 0 4px; }
+    .section-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-title::after {
+      content: ''; flex: 1; height: 1px;
+      background: linear-gradient(to right, var(--border), transparent);
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+    @media (max-width: 1100px) { .grid-6 { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 760px)  { .grid-6,.grid-3,.grid-2 { grid-template-columns: 1fr; } }
+
+    /* ── Cards ─────────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+    .card:hover { border-color: var(--border-hi); }
+    .card-body  { padding: 16px; }
+    .card-title {
+      font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    /* ── Navbar ─────────────────────────────────────────────────────────────── */
+    .navbar {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(10,14,26,0.88);
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      border-bottom: 1px solid var(--border);
+    }
+    .navbar-inner {
+      display: flex; align-items: center; gap: 20px;
+      height: 52px;
+    }
+    .nav-ticker {
+      font-size: 16px; font-weight: 700;
+      background: linear-gradient(135deg, var(--blue), var(--purple));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .nav-company {
+      font-size: 13px; color: var(--text-sec); font-weight: 500;
+      flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .nav-price  { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .nav-change {
+      font-size: 12px; font-weight: 600; padding: 3px 8px;
+      border-radius: 6px; font-variant-numeric: tabular-nums;
+    }
+    .up   { color: var(--green); background: var(--green-bg); }
+    .down { color: var(--red);   background: var(--red-bg);   }
+    .nav-links {
+      display: flex; gap: 4px; margin-left: auto;
+    }
+    .nav-link {
+      font-size: 11px; font-weight: 500; color: var(--muted);
+      padding: 4px 10px; border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-link:hover { color: var(--text); background: var(--elevated); }
+
+    /* ── Hero ───────────────────────────────────────────────────────────────── */
+    .hero {
+      padding: 28px 0 20px;
+      background: linear-gradient(180deg, rgba(61,139,255,0.04) 0%, transparent 100%);
+      border-bottom: 1px solid var(--border);
+    }
+    .hero-inner  { display: flex; gap: 20px; align-items: flex-start; }
+    .hero-left   { flex: 1 1 auto; min-width: 0; }
+    .hero-right  { flex: 0 0 260px; }
+    .hero-ticker {
+      font-size: 36px; font-weight: 700; line-height: 1;
+      background: linear-gradient(135deg, var(--text) 30%, var(--blue));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 4px;
+    }
+    .hero-company {
+      font-size: 15px; color: var(--text-sec); font-weight: 400;
+      margin-bottom: 12px;
+    }
+    .hero-tags   { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .tag {
+      font-size: 11px; font-weight: 500; padding: 3px 10px;
+      border-radius: 20px; border: 1px solid var(--border);
+      color: var(--muted); background: var(--elevated);
+    }
+    .hero-price-row { display: flex; align-items: baseline; gap: 10px; }
+    .hero-price {
+      font-size: 32px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .hero-currency { font-size: 14px; color: var(--muted); }
+    .badge {
+      font-size: 13px; font-weight: 600; padding: 4px 12px;
+      border-radius: 8px; font-variant-numeric: tabular-nums;
+    }
+    .signal-badge {
+      font-size: 11px; font-weight: 700; padding: 4px 12px;
+      border-radius: 20px; letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .signal-strong-buy  { color: #00d68f; background: rgba(0,214,143,0.15); border: 1px solid rgba(0,214,143,0.3); }
+    .signal-buy         { color: #5dd87e; background: rgba(93,216,126,0.12); border: 1px solid rgba(93,216,126,0.25); }
+    .signal-neutral     { color: #ffb700; background: rgba(255,183,0,0.12);  border: 1px solid rgba(255,183,0,0.25); }
+    .signal-sell        { color: #ff8c69; background: rgba(255,140,105,0.12); border: 1px solid rgba(255,140,105,0.25); }
+    .signal-strong-sell { color: #ff3d71; background: rgba(255,61,113,0.15);  border: 1px solid rgba(255,61,113,0.3); }
+
+    /* ── Metric strip ───────────────────────────────────────────────────────── */
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      transition: border-color 0.15s, transform 0.15s;
+    }
+    .metric-card:hover { border-color: var(--border-hi); transform: translateY(-1px); }
+    .metric-label {
+      font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 4px;
+    }
+    .metric-value {
+      font-size: 18px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+    .metric-sub { font-size: 10.5px; color: var(--dim); margin-top: 2px; }
+
+    /* ── Chart wrappers ─────────────────────────────────────────────────────── */
+    .chart-wrap { width: 100%; }
+
+    /* ── Indicator cards ────────────────────────────────────────────────────── */
+    .ind-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .ind-card {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .ind-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+    .ind-value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ind-sub   { font-size: 10px; color: var(--dim); margin-top: 2px; }
+
+    /* ── S/R levels ─────────────────────────────────────────────────────────── */
+    .sr-group       { margin-top: 12px; }
+    .sr-group-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
+    .sr-levels      { display: flex; flex-wrap: wrap; gap: 6px; }
+    .sr-chip {
+      font-size: 12px; font-weight: 600; padding: 4px 10px;
+      border-radius: 6px; font-variant-numeric: tabular-nums;
+    }
+    .sr-support    { color: var(--green); background: var(--green-bg); border: 1px solid rgba(0,214,143,0.2); }
+    .sr-resistance { color: var(--red);   background: var(--red-bg);   border: 1px solid rgba(255,61,113,0.2); }
+
+    /* ── Fundamentals cards ─────────────────────────────────────────────────── */
+    .fund-card {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+    }
+    .fund-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+    .fund-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 6px 0 2px; }
+    .fund-note  { font-size: 11px; color: var(--dim); }
+    .fund-value.positive { color: var(--green); }
+    .fund-value.negative { color: var(--red); }
+    .fund-value.neutral  { color: var(--yellow); }
+
+    /* ── Peer table ─────────────────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; border-radius: var(--radius); }
+    table {
+      width: 100%; border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    thead tr { border-bottom: 1px solid var(--border); }
+    th {
+      text-align: right; padding: 10px 12px;
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--muted); white-space: nowrap;
+    }
+    th:first-child, th:nth-child(2) { text-align: left; }
+    td {
+      text-align: right; padding: 9px 12px;
+      border-bottom: 1px solid rgba(99,120,168,0.07);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    td:first-child, td:nth-child(2) { text-align: left; }
+    tbody tr:hover { background: var(--elevated); }
+    .row-target   { background: rgba(61,139,255,0.06); }
+    .row-target td:first-child { border-left: 3px solid var(--blue); }
+    .cell-above   { color: var(--green); }
+    .cell-below   { color: var(--red); }
+
+    /* ── Performance table ──────────────────────────────────────────────────── */
+    .perf-table td { font-size: 13px; font-weight: 600; }
+    .alpha-pos { color: var(--green); }
+    .alpha-neg { color: var(--red); }
+
+    /* ── News list ──────────────────────────────────────────────────────────── */
+    .news-list   { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+    .news-item   {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      transition: border-color 0.15s;
+    }
+    .news-item:hover { border-color: var(--border-hi); }
+    .news-headline { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+    .news-meta     { display: flex; gap: 10px; font-size: 11px; color: var(--muted); }
+    .sent-pos  { color: var(--green); }
+    .sent-neg  { color: var(--red); }
+    .sent-neu  { color: var(--yellow); }
+
+    /* ── Disclaimer / footer ────────────────────────────────────────────────── */
+    .footer {
+      margin-top: 48px; padding: 24px 0 32px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 11px; color: var(--dim);
+      line-height: 1.7;
+    }
+
+    /* ── Scrollbar ───────────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar        { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track  { background: transparent; }
+    ::-webkit-scrollbar-thumb  { background: var(--elevated); border-radius: 3px; }
+
+    /* ── Divider ─────────────────────────────────────────────────────────────── */
+    .divider { height: 1px; background: var(--border); margin: 8px 0; }
+  </style>
 </head>
 <body>
-    <h1>{{ ticker }} Report - {{ date }}</h1>
-    <p>Report template placeholder. TODO: Implement in PR #4.</p>
+
+<!-- ══ NAVBAR ═══════════════════════════════════════════════════════════════ -->
+<nav class="navbar">
+  <div class="wrap navbar-inner">
+    <span class="nav-ticker">{{ ticker }}</span>
+    <span class="nav-company">{{ company_name }}</span>
+    <span class="nav-price mono">{{ last_price }}</span>
+    <span class="nav-change badge {% if change_positive %}up{% else %}down{% endif %}">
+      {% if change_positive %}▲{% else %}▼{% endif %} {{ change_rate }}
+    </span>
+    <nav class="nav-links">
+      <a class="nav-link" href="#section-price">Price</a>
+      <a class="nav-link" href="#section-technicals">Technical</a>
+      <a class="nav-link" href="#section-fundamentals">Fundamentals</a>
+      <a class="nav-link" href="#section-peers">Sector</a>
+      <a class="nav-link" href="#section-performance">Performance</a>
+      <a class="nav-link" href="#section-sentiment">Sentiment</a>
+    </nav>
+  </div>
+</nav>
+
+<!-- ══ HERO ═════════════════════════════════════════════════════════════════ -->
+<div class="hero">
+  <div class="wrap hero-inner">
+    <div class="hero-left">
+      <div class="hero-ticker">{{ ticker }}</div>
+      <div class="hero-company">{{ company_name }}</div>
+      <div class="hero-tags">
+        {% if sector %}<span class="tag">{{ sector }}</span>{% endif %}
+        {% if industry %}<span class="tag">{{ industry }}</span>{% endif %}
+        {% if currency %}<span class="tag">{{ currency }}</span>{% endif %}
+        <span class="tag">{{ date }}</span>
+      </div>
+      <div class="hero-price-row">
+        <span class="hero-currency mono">{{ currency }}</span>
+        <span class="hero-price mono">{{ last_price }}</span>
+        <span class="badge {% if change_positive %}up{% else %}down{% endif %}">
+          {% if change_positive %}▲{% else %}▼{% endif %} {{ change_rate }}
+        </span>
+        {% set sig_slug = signal_label | lower | replace(' ', '-') %}
+        <span class="signal-badge signal-{{ sig_slug }}">{{ signal_label }}</span>
+      </div>
+      {% if recommendation %}
+      <div style="margin-top:12px; font-size:12px; color:var(--muted);">
+        Analyst consensus: <strong style="color:var(--text)">{{ recommendation }}</strong>
+        {% if analyst_target != '—' %} · Target <strong class="mono" style="color:var(--blue)">{{ analyst_target }}</strong>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <!-- Signal gauge -->
+    <div class="hero-right card" style="padding:0; overflow:hidden;">
+      <div id="chart-signal" class="chart-wrap"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ KEY METRICS STRIP ═════════════════════════════════════════════════ -->
+<div class="wrap section">
+  <div class="section-title">Key Metrics</div>
+  <div class="grid-6">
+    <div class="metric-card">
+      <div class="metric-label">Market Cap</div>
+      <div class="metric-value mono">{{ market_cap }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">P/E Ratio</div>
+      <div class="metric-value mono">{{ pe_ratio }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">P/B Ratio</div>
+      <div class="metric-value mono">{{ pb_ratio }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Div Yield</div>
+      <div class="metric-value mono">{{ div_yield }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Beta</div>
+      <div class="metric-value mono">{{ beta }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">52W Range</div>
+      <div class="metric-value mono" style="font-size:13px;">{{ low_52w }} – {{ high_52w }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 2: PRICE CHART ════════════════════════════════════════════ -->
+<div id="section-price" class="wrap section">
+  <div class="section-title">Price Chart &amp; Technicals</div>
+  <div class="card">
+    <div id="chart-price" class="chart-wrap"></div>
+  </div>
+</div>
+
+<!-- ══ SECTION 3: TECHNICAL INDICATORS ══════════════════════════════════ -->
+<div id="section-technicals" class="wrap section">
+  <div class="section-title">Technical Indicators</div>
+  <div class="grid-2" style="grid-template-columns: 2fr 1fr;">
+
+    <!-- Left: RSI + MACD + Stochastic stacked -->
+    <div style="display:flex; flex-direction:column; gap:16px;">
+
+      <div class="card">
+        <div class="card-body" style="padding-bottom:4px;">
+          <div class="card-title">RSI ({{ rsi_period }})</div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+            <div class="ind-card" style="flex:1; min-width:90px;">
+              <div class="ind-label">RSI Value</div>
+              <div class="ind-value mono
+                {% set rsi_num = rsi_value | float(-1) %}
+                {% if rsi_num > 0 and rsi_num < 30 %} positive
+                {% elif rsi_num > 70 %} negative{% endif %}
+              " style="
+                {% set rsi_num = rsi_value | float(-1) %}
+                {% if rsi_num > 0 and rsi_num < 30 %}color:var(--green)
+                {% elif rsi_num > 70 %}color:var(--red)
+                {% else %}color:var(--text){% endif %}
+              ">{{ rsi_value }}</div>
+              <div class="ind-sub">
+                {% set rsi_num = rsi_value | float(-1) %}
+                {% if rsi_num > 0 and rsi_num < 30 %}Oversold
+                {% elif rsi_num > 70 %}Overbought
+                {% else %}Neutral zone{% endif %}
+              </div>
+            </div>
+            <div class="ind-card" style="flex:1; min-width:90px;">
+              <div class="ind-label">Stoch %K</div>
+              <div class="ind-value mono" style="
+                {% set sk = stoch_k | float(-1) %}
+                {% if sk > 0 and sk < 20 %}color:var(--green)
+                {% elif sk > 80 %}color:var(--red)
+                {% else %}color:var(--text){% endif %}
+              ">{{ stoch_k }}</div>
+              <div class="ind-sub">%D: {{ stoch_d }}</div>
+            </div>
+            <div class="ind-card" style="flex:1; min-width:90px;">
+              <div class="ind-label">BB Bandwidth</div>
+              <div class="ind-value mono">{{ bb_bw }}</div>
+              <div class="ind-sub">Upper: {{ bb_upper }}</div>
+            </div>
+          </div>
+        </div>
+        <div id="chart-rsi" class="chart-wrap"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="padding-bottom:4px;">
+          <div class="card-title">MACD (12, 26, 9)</div>
+        </div>
+        <div id="chart-macd" class="chart-wrap"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-body" style="padding-bottom:4px;">
+          <div class="card-title">Stochastic Oscillator (14, 3)</div>
+        </div>
+        <div id="chart-stoch" class="chart-wrap"></div>
+      </div>
+    </div>
+
+    <!-- Right: SMA summary + S/R levels -->
+    <div style="display:flex; flex-direction:column; gap:16px;">
+
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">Moving Averages</div>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+            {% for period, color in [(20,'#ffb700'),(50,'#3d8bff'),(200,'#a855f7')] %}
+            {% set sma_val = sma.get(period) %}
+            <div style="display:flex; justify-content:space-between; align-items:center;
+                        background:var(--elevated); border-radius:6px; padding:8px 12px;">
+              <span style="font-size:11px; color:var(--muted); font-weight:600;">
+                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                             background:{{ color }};margin-right:6px;"></span>
+                SMA {{ period }}
+              </span>
+              <span class="mono" style="font-size:13px; font-weight:600;
+                {% if sma_val %}
+                  {% set lp = last_price | float(0) %}
+                  {% set sv = sma_val | float(0) %}
+                  {% if lp > sv %}color:var(--green){% else %}color:var(--red){% endif %}
+                {% endif %}
+              ">
+                {% if sma_val %}{{ "%.3f" | format(sma_val) }}{% else %}—{% endif %}
+              </span>
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="sr-group" style="margin-top:16px;">
+            <div class="sr-group-title">Resistance Levels</div>
+            <div class="sr-levels">
+              {% for lvl in resistance_levels %}
+              <span class="sr-chip sr-resistance mono">{{ "%.3f" | format(lvl) }}</span>
+              {% else %}
+              <span style="font-size:11px; color:var(--dim);">No levels detected</span>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="sr-group" style="margin-top:12px;">
+            <div class="sr-group-title">Support Levels</div>
+            <div class="sr-levels">
+              {% for lvl in support_levels %}
+              <span class="sr-chip sr-support mono">{{ "%.3f" | format(lvl) }}</span>
+              {% else %}
+              <span style="font-size:11px; color:var(--dim);">No levels detected</span>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">Signal Breakdown</div>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+            {% set score = signal_score %}
+            {% set checks = [
+              ("Price vs SMA200",  (last_price|float(0)) > (sma.get(200)|float(0)) if sma.get(200) else None),
+              ("Price vs SMA50",   (last_price|float(0)) > (sma.get(50)|float(0))  if sma.get(50)  else None),
+              ("Price vs SMA20",   (last_price|float(0)) > (sma.get(20)|float(0))  if sma.get(20)  else None),
+              ("RSI Zone",         (rsi_value|float(-1)) < 30 if (rsi_value|float(-1)) > 0 else None),
+              ("MACD vs Signal",   (macd_val or 0) > (macd_signal_val or 0) if macd_val is not none else None),
+            ] %}
+            {% for name, bull in checks %}
+            <div style="display:flex; justify-content:space-between; align-items:center;
+                        padding:6px 10px; background:var(--elevated); border-radius:6px;">
+              <span style="font-size:11px; color:var(--muted);">{{ name }}</span>
+              <span style="font-size:11px; font-weight:700;
+                {% if bull == True %}color:var(--green){% elif bull == False %}color:var(--red){% else %}color:var(--dim){% endif %}">
+                {% if bull == True %}▲ Bullish{% elif bull == False %}▼ Bearish{% else %}— N/A{% endif %}
+              </span>
+            </div>
+            {% endfor %}
+          </div>
+          <div style="margin-top:14px; padding:10px 12px; background:var(--elevated);
+                      border-radius:var(--radius-sm); text-align:center;">
+            <div style="font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">
+              Composite Score
+            </div>
+            <div class="mono" style="font-size:24px; font-weight:700;
+              {% if signal_score >= 0.15 %}color:var(--green)
+              {% elif signal_score <= -0.15 %}color:var(--red)
+              {% else %}color:var(--yellow){% endif %}">
+              {{ "%.2f" | format(signal_score) }}
+            </div>
+            <div style="font-size:11px; color:var(--muted); margin-top:2px;">Range: −1.0 (Bear) to +1.0 (Bull)</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 4: FUNDAMENTALS ═══════════════════════════════════════════ -->
+<div id="section-fundamentals" class="wrap section">
+  <div class="section-title">Fundamentals</div>
+  <div class="grid-2">
+
+    <!-- Left: metrics grid + extra rows -->
+    <div style="display:flex; flex-direction:column; gap:16px;">
+      <div class="grid-3">
+        <div class="fund-card">
+          <div class="fund-label">P/E Ratio</div>
+          <div class="fund-value mono">{{ pe_ratio }}</div>
+          <div class="fund-note">Price / Earnings</div>
+        </div>
+        <div class="fund-card">
+          <div class="fund-label">P/B Ratio</div>
+          <div class="fund-value mono">{{ pb_ratio }}</div>
+          <div class="fund-note">Price / Book</div>
+        </div>
+        <div class="fund-card">
+          <div class="fund-label">ROE</div>
+          <div class="fund-value mono {% if roe != '—' %}positive{% endif %}">{{ roe }}</div>
+          <div class="fund-note">Return on Equity</div>
+        </div>
+        <div class="fund-card">
+          <div class="fund-label">EPS (TTM)</div>
+          <div class="fund-value mono">{{ eps_ttm }}</div>
+          <div class="fund-note">Fwd: {{ eps_forward }}</div>
+        </div>
+        <div class="fund-card">
+          <div class="fund-label">Profit Margin</div>
+          <div class="fund-value mono {% if profit_margin != '—' %}positive{% endif %}">{{ profit_margin }}</div>
+          <div class="fund-note">Net Margin</div>
+        </div>
+        <div class="fund-card">
+          <div class="fund-label">Dividend Yield</div>
+          <div class="fund-value mono">{{ div_yield }}</div>
+          <div class="fund-note">Annual</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="card-title">Balance Sheet &amp; Valuation</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;">
+            {% for label, val in [
+              ("Revenue (TTM)", revenue_ttm),
+              ("Book Value/Share", book_value),
+              ("Debt / Equity", debt_to_equity),
+              ("Current Ratio", current_ratio),
+              ("Market Cap", market_cap),
+              ("Beta", beta),
+            ] %}
+            <div style="display:flex; justify-content:space-between; padding:7px 10px;
+                        background:var(--elevated); border-radius:6px;">
+              <span style="font-size:11px; color:var(--muted);">{{ label }}</span>
+              <span class="mono" style="font-size:12px; font-weight:600;">{{ val }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Earnings chart -->
+    <div class="card" style="display:flex; flex-direction:column;">
+      <div class="card-body" style="padding-bottom:4px;">
+        <div class="card-title">Quarterly Earnings</div>
+      </div>
+      <div id="chart-earnings" class="chart-wrap" style="flex:1;"></div>
+      {% if earnings_quarters %}
+      <div style="overflow-x:auto; padding:0 16px 12px;">
+        <table style="font-size:11.5px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;">Period</th>
+              <th>Revenue</th>
+              <th>Net Income</th>
+              {% if earnings_quarters[0].eps_actual is defined %}<th>EPS</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for q in earnings_quarters %}
+            <tr>
+              <td style="text-align:left; color:var(--muted);">{{ q.period }}</td>
+              <td class="mono">{{ fmt_large(q.revenue) }}</td>
+              <td class="mono {% if q.net_income and q.net_income > 0 %}cell-above{% elif q.net_income and q.net_income < 0 %}cell-below{% endif %}">
+                {{ fmt_large(q.net_income) }}
+              </td>
+              {% if q.eps_actual is defined %}
+              <td class="mono">{{ fmt_num(q.eps_actual, 3) }}</td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 5: SECTOR COMPARISON ═════════════════════════════════════ -->
+<div id="section-peers" class="wrap section">
+  <div class="section-title">Sector Comparison</div>
+  <div class="card">
+    <div class="card-body" style="padding-bottom:8px;">
+      <div style="font-size:11px; color:var(--muted);">
+        Target row highlighted in blue ·
+        <span class="cell-above">Green</span> = above sector average ·
+        <span class="cell-below">Red</span> = below sector average
+      </div>
+    </div>
+    <div class="table-wrap">
+      {% if peers_rows %}
+      <table>
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Company</th>
+            <th>Mkt Cap</th>
+            <th>Price</th>
+            <th>P/E</th>
+            <th>P/B</th>
+            <th>ROE</th>
+            <th>EPS</th>
+            <th>Div Yield</th>
+            <th>YTD %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in peers_rows %}
+          <tr class="{% if row.is_target %}row-target{% endif %}">
+            <td class="mono" style="font-weight:600;
+              {% if row.is_target %}color:var(--blue){% endif %}">
+              {{ row.ticker }}{% if row.is_target %} ★{% endif %}
+            </td>
+            <td style="color:var(--text-sec); max-width:160px; overflow:hidden; text-overflow:ellipsis;">
+              {{ row.name or '—' }}
+            </td>
+            <td class="mono">{{ row.mktcap_fmt }}</td>
+            <td class="mono">{{ fmt_num(row.current_price, 3) }}</td>
+            <td class="mono {{ row.pe_class }}">{{ row.pe_fmt }}</td>
+            <td class="mono">{{ row.pb_fmt }}</td>
+            <td class="mono {{ row.roe_class }}">{{ row.roe_fmt }}</td>
+            <td class="mono">{{ row.eps_fmt }}</td>
+            <td class="mono {{ row.div_class }}">{{ row.div_fmt }}</td>
+            <td class="mono {{ row.ytd_class }}">{{ row.ytd_fmt }}</td>
+          </tr>
+          {% endfor %}
+          {% if sector_averages %}
+          <tr style="background:rgba(99,120,168,0.06); font-weight:600;">
+            <td colspan="2" style="color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.08em;">
+              Sector Avg
+            </td>
+            <td>—</td>
+            <td>—</td>
+            <td class="mono" style="color:var(--muted);">{{ fmt_num(sector_averages.get('pe_ratio')) }}</td>
+            <td class="mono" style="color:var(--muted);">{{ fmt_num(sector_averages.get('pb_ratio')) }}</td>
+            <td class="mono" style="color:var(--muted);">{{ fmt_pct(sector_averages.get('roe')) }}</td>
+            <td class="mono" style="color:var(--muted);">{{ fmt_num(sector_averages.get('eps_ttm'), 3) }}</td>
+            <td class="mono" style="color:var(--muted);">{{ fmt_pct(sector_averages.get('dividend_yield')) }}</td>
+            <td class="mono" style="color:var(--muted);">
+              {% set ytd_avg = sector_averages.get('ytd_return_pct') %}
+              {% if ytd_avg is not none %}{{ fmt_num(ytd_avg, 2, suffix='%') }}{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+      {% else %}
+      <div style="padding:24px; text-align:center; color:var(--dim); font-size:13px;">
+        No peer data available.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ══ SECTION 6: PERFORMANCE BENCHMARK ════════════════════════════════ -->
+<div id="section-performance" class="wrap section">
+  <div class="section-title">Performance vs Benchmark</div>
+  <div class="grid-2" style="grid-template-columns:2fr 1fr;">
+
+    <div class="card">
+      <div class="card-body" style="padding-bottom:4px;">
+        <div class="card-title">
+          Cumulative Returns vs {{ benchmark }}
+        </div>
+      </div>
+      <div id="chart-performance" class="chart-wrap"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title">Return Summary</div>
+        <div style="margin-top:8px;">
+          {% if performance_rows %}
+          <table class="perf-table" style="width:100%;">
+            <thead>
+              <tr>
+                <th style="text-align:left; padding:6px 8px;">Period</th>
+                <th style="padding:6px 8px;">Stock</th>
+                <th style="padding:6px 8px;">{{ benchmark }}</th>
+                <th style="padding:6px 8px;">Alpha</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in performance_rows %}
+              {% set t = row.ticker_return_pct %}
+              {% set b = row.benchmark_return_pct %}
+              {% set a = row.alpha_pct %}
+              <tr>
+                <td style="text-align:left; padding:8px; color:var(--muted); font-size:12px;">
+                  {{ row.period }}
+                </td>
+                <td style="padding:8px;" class="mono
+                  {% if t is not none %}{% if t >= 0 %}alpha-pos{% else %}alpha-neg{% endif %}{% endif %}">
+                  {% if t is not none %}{{ fmt_num(t, 2, suffix='%') }}{% else %}—{% endif %}
+                </td>
+                <td style="padding:8px;" class="mono" style="color:var(--muted);">
+                  {% if b is not none %}{{ fmt_num(b, 2, suffix='%') }}{% else %}—{% endif %}
+                </td>
+                <td style="padding:8px;" class="mono
+                  {% if a is not none %}{% if a >= 0 %}alpha-pos{% else %}alpha-neg{% endif %}{% endif %}">
+                  {% if a is not none %}{{ fmt_num(a, 2, suffix='%') }}{% else %}—{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <div style="color:var(--dim); font-size:12px; padding:12px 0;">No performance data.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ SECTION 7: SENTIMENT & NEWS ══════════════════════════════════════ -->
+<div id="section-sentiment" class="wrap section">
+  <div class="section-title">Sentiment &amp; News</div>
+  <div class="grid-2" style="grid-template-columns:1fr 2fr;">
+
+    <!-- Gauge -->
+    <div class="card" style="display:flex; flex-direction:column; justify-content:center;">
+      <div id="chart-sentiment" class="chart-wrap"></div>
+      <div style="text-align:center; padding:0 16px 16px;">
+        <span style="font-size:12px; color:var(--muted);">
+          Sentiment signal:
+          <strong style="
+            {% if sentiment_label|lower in ['positive','bullish'] %}color:var(--green)
+            {% elif sentiment_label|lower in ['negative','bearish'] %}color:var(--red)
+            {% else %}color:var(--yellow){% endif %}
+          ">{{ sentiment_label }}</strong>
+        </span>
+      </div>
+    </div>
+
+    <!-- News list -->
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title">Recent Headlines</div>
+        {% if news_articles %}
+        <div class="news-list" style="max-height:380px; overflow-y:auto;">
+          {% for article in news_articles %}
+          <div class="news-item">
+            <div class="news-headline">
+              {% if article.url %}
+              <a href="{{ article.url }}" target="_blank" rel="noopener" style="color:var(--text);">
+                {{ article.title or article.headline or 'Untitled' }}
+              </a>
+              {% else %}
+              {{ article.title or article.headline or 'Untitled' }}
+              {% endif %}
+            </div>
+            <div class="news-meta">
+              {% if article.source %}<span>{{ article.source }}</span>{% endif %}
+              {% if article.date or article.published_at %}
+              <span>{{ article.date or article.published_at }}</span>
+              {% endif %}
+              {% if article.sentiment is not none %}
+              <span class="
+                {% if article.sentiment > 0.1 %}sent-pos
+                {% elif article.sentiment < -0.1 %}sent-neg
+                {% else %}sent-neu{% endif %}
+              ">
+                {% if article.sentiment > 0.1 %}● Positive
+                {% elif article.sentiment < -0.1 %}● Negative
+                {% else %}● Neutral{% endif %}
+              </span>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div style="padding:24px 0; text-align:center; color:var(--dim);">
+          No recent news articles available.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ FOOTER ════════════════════════════════════════════════════════════ -->
+<div class="wrap footer">
+  <p>
+    <strong>{{ ticker }} · {{ company_name }}</strong> — Generated {{ date }}<br />
+    This report is generated automatically for educational purposes only and does not constitute
+    financial advice. Data sourced from MooMoo OpenD and Yahoo Finance. Past performance is not
+    indicative of future results.
+  </p>
+</div>
+
+<!-- ══ CHART SCRIPTS ═════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  "use strict";
+
+  const CFG = { responsive: true, displayModeBar: false };
+
+  function render(id, jsonStr) {
+    try {
+      const fig = JSON.parse(jsonStr);
+      Plotly.react(id, fig.data || [], fig.layout || {}, CFG);
+    } catch (e) {
+      console.warn("Chart render error for", id, e);
+    }
+  }
+
+  render("chart-signal",      {{ charts.signal      | safe }});
+  render("chart-price",       {{ charts.price       | safe }});
+  render("chart-rsi",         {{ charts.rsi         | safe }});
+  render("chart-macd",        {{ charts.macd        | safe }});
+  render("chart-stoch",       {{ charts.stoch       | safe }});
+  render("chart-earnings",    {{ charts.earnings    | safe }});
+  render("chart-performance", {{ charts.performance | safe }});
+  render("chart-sentiment",   {{ charts.sentiment   | safe }});
+
+  // Redraw on window resize
+  window.addEventListener("resize", () => {
+    ["chart-signal","chart-price","chart-rsi","chart-macd",
+     "chart-stoch","chart-earnings","chart-performance","chart-sentiment"]
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el._fullLayout) Plotly.relayout(id, {});
+      });
+  });
+})();
+</script>
 </body>
 </html>
