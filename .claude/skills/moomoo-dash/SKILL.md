@@ -8,74 +8,160 @@ argument-hint: <TICKER>
 # MooMoo Dashboard — Full Equity Research Report
 
 ## Role
-You are a senior equity research analyst. Given a ticker symbol, you will collect data from multiple sources, run analysis, and produce a polished interactive HTML report.
+You are a senior equity research analyst. Given a ticker symbol you collect real market data, run analysis, and produce a polished interactive HTML report.
 
 ## Input
-The user provides a ticker symbol via `$ARGUMENTS` (e.g., `NVDA`, `AAPL`, `TSLA`).
-Format it as MooMoo expects: `US.{TICKER}` for US stocks.
+Ticker symbol via `$ARGUMENTS`.
+- HK stocks: plain code like `00700` or `HK.00700` → normalise to `HK.00700`
+- US stocks: plain symbol like `AAPL` or `US.AAPL` → normalise to `US.AAPL`
+- Default market is **HK**. If no prefix and code looks numeric, assume HK.
 
 ## Workflow
 
-### Phase 1: Data Collection
+### Step 1 — Normalise the ticker
+```python
+ticker = "$ARGUMENTS".strip().upper()
+if "." not in ticker:
+    # numeric → HK, alpha → US
+    ticker = f"HK.{ticker}" if ticker.isnumeric() else f"US.{ticker}"
+```
 
-1. **MooMoo Market Data** (via MCP: moomoo_server)
-   - Call `get_snapshot` for current price, volume, turnover, P/E, P/B
-   - Call `get_kline` for 180-day daily K-line data
-   - Call `get_plate_for_stock` to identify the stock's sector
-   - Call `get_plate_stocks` to get peer tickers in the same sector
-   - Call `get_snapshot` for top 5-10 peers (for comparison)
+### Step 2 — Collect market data (MooMoo MCP)
 
-2. **Fundamentals** (via MCP: financials_server)
-   - Call `get_fundamentals` for ROE, EPS, dividend yield, revenue, net income
-   - Call `get_earnings` for last 4 quarters of earnings data
+Call these tools. If any fails, log a warning and continue with empty/None for that field.
 
-3. **News & Sentiment** (via MCP: news_sentiment_server)
-   - Call `get_news` for recent articles (last 7 days)
-   - Call `score_sentiment` to compute sentiment scores
+```
+mcp__moomoo_server__get_snapshot(ticker=ticker)
+mcp__moomoo_server__get_kline(ticker=ticker, days=180, kline_type="K_DAY")
+mcp__moomoo_server__get_plate_for_stock(ticker=ticker)
+```
 
-### Phase 2: Analysis
+From the plate result, take the first plate_code and call:
+```
+mcp__moomoo_server__get_plate_stocks(plate_code=<first_plate_code>)
+```
 
-Using the `src/` Python modules:
+From plate_stocks, pick up to 8 peer tickers (exclude the target), then:
+```
+mcp__moomoo_server__get_multi_snapshot(tickers=[...peer tickers...])
+```
 
-1. **Technical Indicators**
-   ```bash
-   python -c "
-   from src.technical_indicators import compute_all
-   import json, pandas as pd
-   kline = pd.read_json('session/kline_data.json')
-   result = compute_all(kline)
-   print(json.dumps(result, indent=2))
-   "
-   ```
+### Step 3 — Collect fundamentals (Financials MCP)
 
-2. **Sector Comparison**
-   - Rank the target stock vs peers on: P/E, P/B, market cap, YTD return
-   - Identify where the stock stands (percentile)
+```
+mcp__financials_server__get_fundamentals(ticker=ticker)
+mcp__financials_server__get_earnings(ticker=ticker)
+mcp__financials_server__get_peer_comparison(ticker=ticker, max_peers=8)
+mcp__financials_server__get_performance(ticker=ticker)
+```
 
-3. **Performance Benchmark**
-   - Fetch benchmark K-line data (SPY, QQQ) for same period
-   - Compute 1M/3M/6M/1Y cumulative returns for target vs benchmarks
+### Step 4 — Collect news & sentiment (optional)
 
-### Phase 3: Report Generation
+Wrap in try/except. If the server is not running, skip gracefully.
 
-1. Run the report generator:
-   ```bash
-   python -c "
-   from src.report_generator import generate_report
-   generate_report(
-       ticker='$ARGUMENTS',
-       output_dir='outputs'
-   )
-   "
-   ```
+```
+mcp__news_sentiment_server__get_news(ticker=ticker, days=7)
+mcp__news_sentiment_server__score_sentiment(articles_json=<articles_json_string>)
+```
 
-2. The HTML report is saved to `outputs/{TICKER}_{YYYY-MM-DD}_report.html`
+If news fails, set `sentiment = None`.
+
+### Step 5 — Compute technical indicators
+
+Parse the kline records from Step 2 into a DataFrame and run:
+
+```bash
+python -c "
+import json, sys, pandas as pd
+from src.technical_indicators import compute_all
+
+kline = json.loads('''$KLINE_JSON''')
+records = kline.get('records', [])
+if not records:
+    print(json.dumps({'signal_score': 0, 'signal_label': 'Neutral', 'sma': {}, 'rsi': {}, 'macd': {}, 'bollinger': {}, 'stochastic': {}, 'support_resistance': {'support':[],'resistance':[]}, 'data_points': 0, 'latest_price': 0}))
+    sys.exit(0)
+
+df = pd.DataFrame(records)
+df = df.rename(columns={'time_key': 'date', 'trade_vol': 'volume', 'trade_val': 'turnover'})
+result = compute_all(df)
+print(json.dumps(result))
+"
+```
+
+Or pass the data directly via a temp file if the JSON is large.
+
+### Step 6 — Generate the HTML report
+
+```bash
+python -c "
+import json, sys
+sys.path.insert(0, '.')
+from src.report_generator import generate_report
+
+snapshot      = $SNAPSHOT_JSON
+kline_records = $KLINE_RECORDS
+fundamentals  = $FUNDAMENTALS_JSON
+earnings      = $EARNINGS_JSON
+technicals    = $TECHNICALS_JSON
+peers         = $PEERS_JSON
+performance   = $PERFORMANCE_JSON
+sentiment     = $SENTIMENT_JSON  # None if unavailable
+
+path = generate_report(
+    ticker='$TICKER',
+    snapshot=snapshot,
+    kline_records=kline_records,
+    fundamentals=fundamentals,
+    earnings=earnings,
+    technicals=technicals,
+    peers=peers,
+    performance=performance,
+    sentiment=sentiment,
+    output_dir='outputs',
+)
+print(path)
+"
+```
+
+**Preferred shortcut — use the orchestrator:**
+```bash
+python -m src.orchestrator $ARGUMENTS
+```
+The orchestrator handles all data collection, analysis, and report generation in one call.
+
+### Step 7 — Show summary
+
+After the report is written, display:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  {TICKER} — {Company Name}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Report saved to: outputs/{TICKER}_{date}_report.html
+
+  Price:   {last_price} ({change_pct}%)
+  Signal:  {signal_label}  (score: {signal_score:.2f})
+  RSI:     {rsi_value}
+  Market Cap: {market_cap}
+  P/E:     {pe_ratio}
+
+  Top insights:
+  1. {derive from signal score / SMA position}
+  2. {derive from RSI / MACD cross}
+  3. {derive from performance vs benchmark}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+## Error Handling
+
+| Failure | Action |
+|---|---|
+| OpenD not running | Error clearly: "MooMoo OpenD is not running. Start OpenD and retry." |
+| Ticker not found in snapshot | Warn and try to continue with yfinance-only data |
+| Kline empty / too short | Technicals will be sparse; report still generates |
+| news_sentiment_server offline | Skip sentiment section (report still renders) |
+| financials_server offline | Use MooMoo snapshot ratios as fallback |
 
 ## Output
-
-- Tell the user the report has been generated
-- Show the file path
-- Display a brief text summary:
-  - Current price and daily change
-  - Overall signal (Bullish / Neutral / Bearish) based on technical + fundamental + sentiment
-  - Top 3 key insights from the analysis
+- HTML report at `outputs/{TICKER}_{YYYY-MM-DD}_report.html`
+- Brief text summary in Claude Code terminal

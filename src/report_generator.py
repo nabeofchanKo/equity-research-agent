@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 import pandas as pd
 import plotly.graph_objects as go
+import yfinance as yf
 from jinja2 import Environment, FileSystemLoader
 from plotly.subplots import make_subplots
 
@@ -350,6 +351,153 @@ def _build_performance_chart(performance_data: list[dict]) -> str:
     return _fig_json(fig)
 
 
+def _build_peer_performance_chart(
+    target_ticker: str,
+    target_kline_df: pd.DataFrame,
+    peers: dict,
+    benchmark: str,
+) -> str:
+    """
+    Indexed (rebased to 100) line chart comparing the target stock vs
+    sector peers and the benchmark index over the last ~6 months.
+
+    Peer and benchmark prices are fetched from yfinance.  If yfinance is
+    unavailable for a peer, that series is silently skipped.
+
+    Args:
+        target_ticker:   Display label for the target stock.
+        target_kline_df: DataFrame from _kline_to_df (must have 'date' and 'close').
+        peers:           Output of financials_server.get_peer_comparison.
+        benchmark:       yfinance ticker for the index (e.g. "^HSI", "^GSPC").
+    """
+    if target_kline_df.empty:
+        return go.Figure().to_json()
+
+    # ── Pick up to 4 peers by market cap (descending), exclude the target ──
+    peer_rows = [
+        p for p in peers.get("peers", [])
+        if not p.get("is_target")
+    ]
+    peer_rows = sorted(
+        peer_rows,
+        key=lambda r: r.get("market_cap") or 0,
+        reverse=True,
+    )[:4]
+    peer_yf_tickers = [p["ticker"] for p in peer_rows]
+    peer_names      = {p["ticker"]: (p.get("name") or p["ticker"]).split()[0] for p in peer_rows}
+
+    # ── Date range driven by the target kline ─────────────────────────────
+    target_df = target_kline_df[["date", "close"]].dropna().copy()
+    target_df["date"] = pd.to_datetime(target_df["date"])
+    target_df = target_df.sort_values("date").reset_index(drop=True)
+
+    if len(target_df) < 2:
+        return go.Figure().to_json()
+
+    start_str = target_df["date"].iloc[0].strftime("%Y-%m-%d")
+    end_str   = target_df["date"].iloc[-1].strftime("%Y-%m-%d")
+
+    # ── Rebase helper ──────────────────────────────────────────────────────
+    def _rebase(series: pd.Series) -> pd.Series:
+        s = series.dropna()
+        if s.empty or s.iloc[0] == 0:
+            return s
+        return (s / s.iloc[0]) * 100
+
+    # ── Peer / benchmark colours ───────────────────────────────────────────
+    _PEER_COLORS = ["#5d87e8", "#e85d9e", "#5de8a0", "#e8c85d", "#b05de8"]
+
+    fig = go.Figure()
+
+    # Baseline
+    fig.add_hline(
+        y=100,
+        line=dict(color=C["muted"], width=0.8, dash="dot"),
+        annotation_text="Baseline (100)",
+        annotation_font=dict(size=9, color=C["muted"]),
+        annotation_position="bottom right",
+    )
+
+    # ── Benchmark (yfinance) ───────────────────────────────────────────────
+    try:
+        bench_raw = yf.download(benchmark, start=start_str, end=end_str,
+                                auto_adjust=True, progress=False)
+        if not bench_raw.empty:
+            bench_close = bench_raw["Close"] if "Close" in bench_raw.columns else bench_raw.iloc[:, 0]
+            bench_idx   = _rebase(bench_close)
+            fig.add_trace(go.Scatter(
+                x=bench_idx.index, y=bench_idx.values,
+                name=benchmark,
+                line=dict(color=C["muted"], width=1.5, dash="dash"),
+                opacity=0.8,
+                hovertemplate=(
+                    f"<b>{benchmark}</b><br>"
+                    "Indexed: %{y:.1f}<br>"
+                    "Chg: %{customdata:.1f}%<extra></extra>"
+                ),
+                customdata=(bench_idx.values - 100),
+            ))
+    except Exception:
+        pass
+
+    # ── Peer lines (yfinance) ─────────────────────────────────────────────
+    for i, yf_ticker in enumerate(peer_yf_tickers):
+        try:
+            raw = yf.download(yf_ticker, start=start_str, end=end_str,
+                              auto_adjust=True, progress=False)
+            if raw.empty:
+                continue
+            close   = raw["Close"] if "Close" in raw.columns else raw.iloc[:, 0]
+            rebased = _rebase(close)
+            color   = _PEER_COLORS[i % len(_PEER_COLORS)]
+            label   = peer_names.get(yf_ticker, yf_ticker)
+            fig.add_trace(go.Scatter(
+                x=rebased.index, y=rebased.values,
+                name=label,
+                line=dict(color=color, width=1.0),
+                opacity=0.6,
+                hovertemplate=(
+                    f"<b>{label}</b><br>"
+                    "Indexed: %{y:.1f}<br>"
+                    "Chg: %{customdata:.1f}%<extra></extra>"
+                ),
+                customdata=(rebased.values - 100),
+            ))
+        except Exception:
+            continue
+
+    # ── Target stock (MooMoo kline, plotted last so it's on top) ──────────
+    target_close  = target_df["close"].astype(float)
+    target_rebased = _rebase(target_close)
+    fig.add_trace(go.Scatter(
+        x=target_df["date"].values, y=target_rebased.values,
+        name=target_ticker,
+        line=dict(color=C["yellow"], width=2.5),
+        hovertemplate=(
+            f"<b>{target_ticker}</b><br>"
+            "Indexed: %{y:.1f}<br>"
+            "Chg: %{customdata:.1f}%<extra></extra>"
+        ),
+        customdata=(target_rebased.values - 100),
+    ))
+
+    base = {k: v for k, v in _BASE_LAYOUT.items() if k != "legend"}
+    fig.update_layout(
+        **base,
+        height=380,
+        yaxis=dict(**_YAXIS, title="Indexed (100 = start)", ticksuffix=""),
+        xaxis=dict(**_XAXIS),
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=10, color=C["muted"]),
+            orientation="h",
+            yanchor="bottom", y=1.01,
+            xanchor="left", x=0,
+        ),
+    )
+    return _fig_json(fig)
+
+
 def _build_gauge(value: float, label: str,
                  lo_color: str = "#ff3d71", hi_color: str = "#00d68f") -> str:
     """Generic [0-100] gauge."""
@@ -494,15 +642,20 @@ def generate_report(
     sent_gauge = round((sent_raw + 1) / 2 * 100)
     sent_label = (sentiment or {}).get("label", "Neutral")
 
+    bench = performance.get("benchmark", "^HSI")
+    clean_ticker_label = ticker.split(".")[-1] if "." in ticker else ticker
+
     charts = {
-        "price":       _build_price_chart(kline_df, technicals),
-        "rsi":         _build_rsi_chart(kline_df),
-        "macd":        _build_macd_chart(kline_df),
-        "stoch":       _build_stoch_chart(kline_df),
-        "earnings":    _build_earnings_chart(earnings.get("quarters", [])),
-        "performance": _build_performance_chart(performance.get("performance", [])),
-        "signal":      _build_gauge(sig_gauge, sig_label),
-        "sentiment":   _build_gauge(sent_gauge, sent_label),
+        "price":            _build_price_chart(kline_df, technicals),
+        "rsi":              _build_rsi_chart(kline_df),
+        "macd":             _build_macd_chart(kline_df),
+        "stoch":            _build_stoch_chart(kline_df),
+        "earnings":         _build_earnings_chart(earnings.get("quarters", [])),
+        "performance":      _build_performance_chart(performance.get("performance", [])),
+        "peer_performance": _build_peer_performance_chart(
+                                clean_ticker_label, kline_df, peers, bench),
+        "signal":           _build_gauge(sig_gauge, sig_label),
+        "sentiment":        _build_gauge(sent_gauge, sent_label),
     }
 
     clean_ticker  = ticker.split(".")[-1] if "." in ticker else ticker
@@ -574,7 +727,8 @@ def generate_report(
 
     out_dir  = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{clean_ticker}_{date.today().isoformat()}_report.html"
+    safe_ticker = ticker.replace(".", "_")
+    out_path = out_dir / f"{safe_ticker}_{date.today().isoformat()}_report.html"
     out_path.write_text(html, encoding="utf-8")
     logger.info("Report written → %s", out_path)
     return str(out_path)

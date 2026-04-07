@@ -22,13 +22,20 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path setup — allow `import server` from the MCP server directory
+# Import the server module by file path under a unique module name so that
+# multiple server.py files can coexist in sys.modules during a combined run.
 # ---------------------------------------------------------------------------
-_SERVER_DIR = Path(__file__).parent.parent / "mcp_servers" / "moomoo_server"
-if str(_SERVER_DIR) not in sys.path:
-    sys.path.insert(0, str(_SERVER_DIR))
+import importlib.util as _ilu
 
-import server as moomoo_server  # noqa: E402  (after sys.path manipulation)
+_SERVER_FILE = Path(__file__).parent.parent / "mcp_servers" / "moomoo_server" / "server.py"
+_SERVER_DIR  = str(_SERVER_FILE.parent)
+if _SERVER_DIR not in sys.path:
+    sys.path.insert(0, _SERVER_DIR)   # needed for relative imports inside server.py
+
+_spec = _ilu.spec_from_file_location("moomoo_server_mod", _SERVER_FILE)
+moomoo_server = _ilu.module_from_spec(_spec)
+sys.modules["moomoo_server_mod"] = moomoo_server
+_spec.loader.exec_module(moomoo_server)
 
 # Convenience re-imports of the tool functions
 _normalize_ticker = moomoo_server._normalize_ticker

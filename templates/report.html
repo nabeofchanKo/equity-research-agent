@@ -322,6 +322,7 @@
       <a class="nav-link" href="#section-technicals">Technical</a>
       <a class="nav-link" href="#section-fundamentals">Fundamentals</a>
       <a class="nav-link" href="#section-peers">Sector</a>
+      <a class="nav-link" href="#section-peer-performance">Rel. Perf</a>
       <a class="nav-link" href="#section-performance">Performance</a>
       <a class="nav-link" href="#section-sentiment">Sentiment</a>
     </nav>
@@ -742,6 +743,22 @@
   </div>
 </div>
 
+<!-- ══ SECTION 5b: SECTOR RELATIVE PERFORMANCE ══════════════════════════ -->
+<div id="section-peer-performance" class="wrap section">
+  <div class="section-title">Sector Relative Performance</div>
+  <div class="card">
+    <div class="card-body" style="padding-bottom:4px;">
+      <div class="card-title">6-Month Indexed Performance (100 = Start Date)</div>
+      <div style="font-size:11px; color:var(--muted); margin-top:2px;">
+        <span style="color:var(--yellow); font-weight:600;">━━</span> {{ ticker }} &nbsp;
+        <span style="color:var(--muted);">- - -</span> {{ benchmark }} benchmark &nbsp;
+        <span style="color:#5d87e8;">━</span> sector peers
+      </div>
+    </div>
+    <div id="chart-peer-performance" class="chart-wrap"></div>
+  </div>
+</div>
+
 <!-- ══ SECTION 6: PERFORMANCE BENCHMARK ════════════════════════════════ -->
 <div id="section-performance" class="wrap section">
   <div class="section-title">Performance vs Benchmark</div>
@@ -889,9 +906,8 @@
 
   const CFG = { responsive: true, displayModeBar: false };
 
-  function render(id, jsonStr) {
+  function render(id, fig) {
     try {
-      const fig = JSON.parse(jsonStr);
       Plotly.react(id, fig.data || [], fig.layout || {}, CFG);
     } catch (e) {
       console.warn("Chart render error for", id, e);
@@ -904,13 +920,15 @@
   render("chart-macd",        {{ charts.macd        | safe }});
   render("chart-stoch",       {{ charts.stoch       | safe }});
   render("chart-earnings",    {{ charts.earnings    | safe }});
+  render("chart-peer-performance", {{ charts.peer_performance | safe }});
   render("chart-performance", {{ charts.performance | safe }});
   render("chart-sentiment",   {{ charts.sentiment   | safe }});
 
   // Redraw on window resize
   window.addEventListener("resize", () => {
     ["chart-signal","chart-price","chart-rsi","chart-macd",
-     "chart-stoch","chart-earnings","chart-performance","chart-sentiment"]
+     "chart-stoch","chart-earnings","chart-peer-performance",
+     "chart-performance","chart-sentiment"]
       .forEach(id => {
         const el = document.getElementById(id);
         if (el && el._fullLayout) Plotly.relayout(id, {});

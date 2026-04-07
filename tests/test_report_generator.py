@@ -22,6 +22,7 @@ import pytest
 from src.report_generator import (
     _build_earnings_chart,
     _build_macd_chart,
+    _build_peer_performance_chart,
     _build_performance_chart,
     _build_price_chart,
     _build_rsi_chart,
@@ -353,6 +354,157 @@ class TestBuildPerformanceChart:
     def test_empty_returns_empty_figure(self):
         fig = json.loads(_build_performance_chart([]))
         assert "data" in fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _build_peer_performance_chart
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _mock_yf_download(tickers, start=None, end=None, **kwargs):
+    """Synthetic price DataFrame for any yfinance ticker."""
+    import numpy as np
+    rng = np.random.default_rng(42)
+    n = 60
+    idx = pd.date_range(end=pd.Timestamp.today(), periods=n, freq="B")
+    price = 100 * np.exp(np.cumsum(rng.normal(0.0006, 0.015, n)))
+    if isinstance(tickers, list):
+        cols = pd.MultiIndex.from_product([["Close"], tickers])
+        data = {("Close", t): price for t in tickers}
+        return pd.DataFrame(data, index=idx, columns=cols)
+    return pd.DataFrame({"Close": price}, index=idx)
+
+
+class TestBuildPeerPerformanceChart:
+    def _call(self, target_df=None, peers=None, benchmark="^HSI",
+              mock_download=True):
+        df = target_df if target_df is not None else _df()
+        p  = peers    if peers    is not None else _make_peers()
+        if mock_download:
+            import src.report_generator as rg
+            with patch.object(rg, "yf") as mock_yf:
+                mock_yf.download.side_effect = _mock_yf_download
+                return json.loads(_build_peer_performance_chart(
+                    "HK.00700", df, p, benchmark))
+        return json.loads(_build_peer_performance_chart(
+            "HK.00700", df, p, benchmark))
+
+    def test_returns_valid_json(self):
+        fig = self._call()
+        assert "data" in fig
+        assert "layout" in fig
+
+    def test_empty_df_returns_empty_figure(self):
+        fig = json.loads(_build_peer_performance_chart(
+            "HK.00700", pd.DataFrame(), _make_peers(), "^HSI"))
+        assert "data" in fig
+        assert len(fig["data"]) == 0
+
+    def test_single_row_df_returns_empty_figure(self):
+        single = _df().iloc[:1]
+        fig = json.loads(_build_peer_performance_chart(
+            "HK.00700", single, _make_peers(), "^HSI"))
+        assert "data" in fig
+        assert len(fig["data"]) == 0
+
+    def test_target_trace_always_present(self):
+        """Target ticker trace must be added even when yfinance raises."""
+        import src.report_generator as rg
+        with patch.object(rg, "yf") as mock_yf:
+            mock_yf.download.side_effect = Exception("network error")
+            fig = json.loads(_build_peer_performance_chart(
+                "HK.00700", _df(), _make_peers(), "^HSI"))
+        names = [t.get("name", "") for t in fig["data"]]
+        assert "HK.00700" in names
+
+    def test_target_trace_is_last(self):
+        """Target must be plotted last (on top)."""
+        fig = self._call()
+        assert fig["data"][-1]["name"] == "HK.00700"
+
+    def test_benchmark_trace_when_download_succeeds(self):
+        fig = self._call()
+        names = [t.get("name", "") for t in fig["data"]]
+        assert "^HSI" in names
+
+    def test_peer_trace_present(self):
+        """At least one peer trace (Alibaba) should appear."""
+        fig = self._call()
+        names = [t.get("name", "") for t in fig["data"]]
+        # peer_names uses first word of name: "Alibaba"
+        assert any(n not in ("HK.00700", "^HSI") for n in names)
+
+    def test_no_more_than_4_peer_traces(self):
+        """Max 4 peers regardless of how many peers are passed."""
+        many_peers = {
+            "ticker": "HK.00700",
+            "peers": [
+                {"ticker": f"P{i}.HK", "is_target": False, "name": f"Peer {i}",
+                 "market_cap": (10 - i) * 1e11, "current_price": 100}
+                for i in range(7)
+            ],
+            "sector_averages": {},
+        }
+        fig = self._call(peers=many_peers)
+        non_target = [t for t in fig["data"] if t.get("name") != "HK.00700"]
+        # benchmark + at most 4 peers = 5 max
+        assert len(non_target) <= 5
+
+    def test_target_not_included_as_peer(self):
+        """is_target=True peers must be excluded from peer lines."""
+        fig = self._call()
+        names = [t.get("name", "") for t in fig["data"]]
+        # "Tencent" is the is_target peer's first name word
+        assert "Tencent" not in names
+
+    def test_yfinance_exception_for_peer_skips_gracefully(self):
+        """If yf.download raises for one peer, target still renders."""
+        import src.report_generator as rg
+        call_count = [0]
+
+        def _sometimes_fail(tickers, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("peer download failed")
+            return _mock_yf_download(tickers, **kwargs)
+
+        with patch.object(rg, "yf") as mock_yf:
+            mock_yf.download.side_effect = _sometimes_fail
+            fig = json.loads(_build_peer_performance_chart(
+                "HK.00700", _df(), _make_peers(), "^HSI"))
+        names = [t.get("name", "") for t in fig["data"]]
+        assert "HK.00700" in names
+
+    def test_all_traces_are_scatter_type(self):
+        fig = self._call()
+        for trace in fig["data"]:
+            assert trace.get("type") == "scatter"
+
+    def test_target_line_is_yellow(self):
+        fig = self._call()
+        target = fig["data"][-1]
+        assert target["line"]["color"] == "#ffb700"  # C["yellow"]
+
+    def test_benchmark_line_is_dashed(self):
+        fig = self._call()
+        bench = next(t for t in fig["data"] if t.get("name") == "^HSI")
+        assert bench["line"]["dash"] == "dash"
+
+    def test_target_trace_has_y_data(self):
+        """Target scatter trace must carry y-axis data."""
+        fig = self._call()
+        target = fig["data"][-1]
+        assert "y" in target
+        assert target["y"]  # non-empty
+
+    def test_empty_peers_still_renders_target(self):
+        empty_peers = {"ticker": "HK.00700", "peers": [], "sector_averages": {}}
+        import src.report_generator as rg
+        with patch.object(rg, "yf") as mock_yf:
+            mock_yf.download.side_effect = _mock_yf_download
+            fig = json.loads(_build_peer_performance_chart(
+                "HK.00700", _df(), empty_peers, "^HSI"))
+        names = [t.get("name", "") for t in fig["data"]]
+        assert "HK.00700" in names
 
 
 # ─────────────────────────────────────────────────────────────────────────────

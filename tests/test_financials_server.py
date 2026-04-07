@@ -17,13 +17,19 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path setup
+# Import the server module by file path under a unique module name.
 # ---------------------------------------------------------------------------
-_SERVER_DIR = Path(__file__).parent.parent / "mcp_servers" / "financials_server"
-if str(_SERVER_DIR) not in sys.path:
-    sys.path.insert(0, str(_SERVER_DIR))
+import importlib.util as _ilu
 
-import server as fin_server  # noqa: E402
+_SERVER_FILE = Path(__file__).parent.parent / "mcp_servers" / "financials_server" / "server.py"
+_SERVER_DIR  = str(_SERVER_FILE.parent)
+if _SERVER_DIR not in sys.path:
+    sys.path.insert(0, _SERVER_DIR)
+
+_spec = _ilu.spec_from_file_location("financials_server_mod", _SERVER_FILE)
+fin_server = _ilu.module_from_spec(_spec)
+sys.modules["financials_server_mod"] = fin_server
+_spec.loader.exec_module(fin_server)
 
 get_fundamentals  = fin_server.get_fundamentals
 get_earnings      = fin_server.get_earnings

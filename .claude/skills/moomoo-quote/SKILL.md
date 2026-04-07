@@ -8,30 +8,68 @@ argument-hint: <TICKER>
 # MooMoo Quick Quote
 
 ## Role
-Provide a concise snapshot of a stock's current state.
+Provide a concise snapshot of a stock's current state. Fast — no HTML file generated.
 
 ## Input
 Ticker symbol via `$ARGUMENTS`.
 
 ## Steps
 
-1. Call MCP `moomoo_server.get_snapshot` for `US.$ARGUMENTS`
-2. Call MCP `financials_server.get_fundamentals` for key ratios
-3. Display a formatted summary:
+### 1. Normalise ticker
+```
+HK.00700 → HK.00700   (already prefixed)
+00700    → HK.00700   (numeric → HK)
+AAPL     → US.AAPL    (alpha → US)
+US.AAPL  → US.AAPL    (already prefixed)
+```
+
+### 2. Fetch snapshot from MooMoo
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  {TICKER} — {Company Name}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Price:     ${current_price} ({change_pct}%)
-  Volume:    {volume}
-  Market Cap: ${market_cap}
-  P/E:       {pe_ratio}
-  P/B:       {pb_ratio}
-  52W Range: ${low_52w} — ${high_52w}
-  Dividend:  {div_yield}%
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+mcp__moomoo_server__get_snapshot(ticker=<normalised_ticker>)
 ```
+
+Parse the JSON response. If `"error"` key is present, show the error and stop.
+
+### 3. Fetch fundamentals from yfinance
+
+```
+mcp__financials_server__get_fundamentals(ticker=<normalised_ticker>)
+```
+
+If this fails, use whatever fields were already in the MooMoo snapshot.
+
+### 4. Display text summary
+
+Format and print:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  {TICKER} — {Company Name}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Price:      {last_price} {currency}
+  Change:     {change_val} ({change_rate}%)
+  Volume:     {volume:,}
+  Turnover:   {turnover}
+
+  Market Cap: {market_cap}
+  P/E:        {pe_ratio}
+  P/B:        {pb_ratio}
+  ROE:        {roe}
+  EPS (TTM):  {eps_ttm}
+  Div Yield:  {dividend_yield}
+  Beta:       {beta}
+
+  52W High:   {52w_high}
+  52W Low:    {52w_low}
+
+  Analyst:    {recommendation} · Target {analyst_target}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+Use `—` for any field that is None or missing.
+Format market cap with T/B/M suffix (e.g. 3.70T).
+Change line: green arrow ▲ if positive, red arrow ▼ if negative.
 
 ## Output
-Text-only summary displayed in Claude Code. No file generated.
+Text-only summary displayed in Claude Code terminal. No file generated.
