@@ -23,13 +23,16 @@ AAPL     → US.AAPL    (alpha → US)
 US.AAPL  → US.AAPL    (already prefixed)
 ```
 
-### 2. Fetch snapshot from MooMoo
+### 2. Fetch snapshot (MooMoo primary, yfinance fallback)
 
 ```
 mcp__moomoo_server__get_snapshot(ticker=<normalised_ticker>)
 ```
 
-Parse the JSON response. If `"error"` key is present, show the error and stop.
+Parse the JSON response.  MooMoo is tried first; if it returns a permission
+or connection error the tool automatically retries with yfinance.  Check the
+`"source"` field (`"moomoo"` or `"yfinance"`) to see which backend was used.
+If `"error"` key is present and no fallback succeeded, show the error and stop.
 
 ### 3. Fetch fundamentals from yfinance
 

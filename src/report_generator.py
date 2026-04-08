@@ -368,7 +368,7 @@ def _build_peer_performance_chart(
         target_ticker:   Display label for the target stock.
         target_kline_df: DataFrame from _kline_to_df (must have 'date' and 'close').
         peers:           Output of financials_server.get_peer_comparison.
-        benchmark:       yfinance ticker for the index (e.g. "^HSI", "^GSPC").
+        benchmark:       yfinance ticker for the index (e.g. "^HSI" for HK, "SPY" for US).
     """
     if target_kline_df.empty:
         return go.Figure().to_json()
@@ -400,9 +400,28 @@ def _build_peer_performance_chart(
     # ── Rebase helper ──────────────────────────────────────────────────────
     def _rebase(series: pd.Series) -> pd.Series:
         s = series.dropna()
-        if s.empty or s.iloc[0] == 0:
+        if s.empty or float(s.iloc[0]) == 0:
             return s
-        return (s / s.iloc[0]) * 100
+        return (s / float(s.iloc[0])) * 100
+
+    def _close_series(df: pd.DataFrame) -> pd.Series:
+        """Extract a plain Series of close prices from a yf.download() result.
+
+        yfinance 0.2+ returns MultiIndex columns even for single-ticker downloads,
+        so raw["Close"] is a single-column DataFrame, not a Series.
+        """
+        if df.empty:
+            return pd.Series(dtype=float)
+        if isinstance(df.columns, pd.MultiIndex):
+            # MultiIndex: ("Close", "MSFT") — squeeze to Series
+            if "Close" in df.columns.get_level_values(0):
+                col = df["Close"]
+                return col.iloc[:, 0] if isinstance(col, pd.DataFrame) else col
+            return df.iloc[:, 0]
+        if "Close" in df.columns:
+            col = df["Close"]
+            return col.iloc[:, 0] if isinstance(col, pd.DataFrame) else col
+        return df.iloc[:, 0]
 
     # ── Peer / benchmark colours ───────────────────────────────────────────
     _PEER_COLORS = ["#5d87e8", "#e85d9e", "#5de8a0", "#e8c85d", "#b05de8"]
@@ -422,9 +441,9 @@ def _build_peer_performance_chart(
     try:
         bench_raw = yf.download(benchmark, start=start_str, end=end_str,
                                 auto_adjust=True, progress=False)
-        if not bench_raw.empty:
-            bench_close = bench_raw["Close"] if "Close" in bench_raw.columns else bench_raw.iloc[:, 0]
-            bench_idx   = _rebase(bench_close)
+        bench_close = _close_series(bench_raw)
+        if not bench_close.empty:
+            bench_idx = _rebase(bench_close)
             fig.add_trace(go.Scatter(
                 x=bench_idx.index, y=bench_idx.values,
                 name=benchmark,
@@ -445,9 +464,9 @@ def _build_peer_performance_chart(
         try:
             raw = yf.download(yf_ticker, start=start_str, end=end_str,
                               auto_adjust=True, progress=False)
-            if raw.empty:
+            close = _close_series(raw)
+            if close.empty:
                 continue
-            close   = raw["Close"] if "Close" in raw.columns else raw.iloc[:, 0]
             rebased = _rebase(close)
             color   = _PEER_COLORS[i % len(_PEER_COLORS)]
             label   = peer_names.get(yf_ticker, yf_ticker)
@@ -642,7 +661,9 @@ def generate_report(
     sent_gauge = round((sent_raw + 1) / 2 * 100)
     sent_label = (sentiment or {}).get("label", "Neutral")
 
-    bench = performance.get("benchmark", "^HSI")
+    # Use benchmark from performance data; default to SPY for US, ^HSI for HK
+    _is_hk = ticker.upper().startswith("HK.")
+    bench = performance.get("benchmark") or ("^HSI" if _is_hk else "SPY")
     clean_ticker_label = ticker.split(".")[-1] if "." in ticker else ticker
 
     charts = {

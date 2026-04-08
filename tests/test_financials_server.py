@@ -333,11 +333,11 @@ class TestGetPerformance:
         assert "^HSI" in call_args[0][0]
 
     def test_default_benchmark_us(self):
-        df = self._make_download_df("AAPL", "^GSPC")
+        df = self._make_download_df("AAPL", "SPY")
         with patch.object(fin_server.yf, "download", return_value=df) as mock_dl:
             get_performance("US.AAPL")
         call_args = mock_dl.call_args
-        assert "^GSPC" in call_args[0][0]
+        assert "SPY" in call_args[0][0]
 
     def test_explicit_benchmark_used(self):
         df = self._make_download_df("AAPL", "^IXIC")

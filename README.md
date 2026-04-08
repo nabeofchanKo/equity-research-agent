@@ -16,9 +16,13 @@ Input a ticker → get a comprehensive interactive HTML dashboard with real-time
 | [MooMoo OpenD](https://www.moomoo.com/download/OpenAPI) | Local gateway for real-time data — must be running |
 | MooMoo Account | Free account provides HK LV1 market data |
 
-> **Market data access:**  
+> **Market data access & automatic fallback:**  
 > HK stocks (LV1) are available on a **free** MooMoo account.  
 > US stocks require a **paid subscription** or qualifying account balance.  
+> **When MooMoo returns a permission error or is unreachable, the system
+> automatically falls back to yfinance** for snapshot and K-line data — no
+> configuration needed.  A `"source"` field in every response indicates whether
+> data came from `"moomoo"` or `"yfinance"`.  
 > The demo and all defaults use `HK.00700` (Tencent) which works on free accounts.
 
 ### Install
@@ -72,6 +76,8 @@ python -m src.orchestrator HK.00700 --output-dir ./my-reports
 ```
 
 The orchestrator connects to OpenD and yfinance directly — no MCP or Claude required.
+If MooMoo is unavailable or returns a permission error, the orchestrator falls back
+to yfinance automatically and continues generating the report.
 
 ### View the sample report (no OpenD required)
 
@@ -84,7 +90,7 @@ python scripts/generate_sample_report.py
 
 ## Report Sections
 
-The generated single-file HTML report includes 7 interactive sections:
+The generated single-file HTML report includes 8 interactive sections:
 
 | # | Section | Contents |
 |---|---|---|
@@ -93,7 +99,8 @@ The generated single-file HTML report includes 7 interactive sections:
 | 3 | **Technical Indicators** | RSI, MACD (with histogram), Stochastic, support/resistance levels |
 | 4 | **Fundamentals** | P/E, P/B, ROE, EPS, margins + quarterly earnings bar chart |
 | 5 | **Sector Comparison** | Peer ranking table with color-coded relative valuation |
-| 6 | **Performance Benchmark** | Stock vs index (^HSI or ^GSPC) over 1M / 3M / 6M / 1Y |
+| 5b | **Sector Relative Performance** | Indexed (100 = start) line chart: target vs peers vs benchmark |
+| 6 | **Performance Benchmark** | Stock vs ^HSI (HK) or SPY (US) over 1M / 3M / 6M / 1Y |
 | 7 | **Sentiment & News** | Sentiment gauge + recent headlines with per-article scores |
 
 ---
@@ -105,15 +112,17 @@ Three MCP servers expose data as tools. They are registered in `.claude.json` an
 ### `moomoo_server` — Real-time market data
 
 Connects to MooMoo OpenD gateway. Provides live quotes, candlestick data, and sector/plate information.
+**Automatically falls back to yfinance** when MooMoo returns a permission error or connection error.
+Every response includes a `"source"` field: `"moomoo"`, `"yfinance"`, or `"moomoo_only"`.
 
-| Tool | Description |
-|---|---|
-| `get_snapshot(ticker)` | Price, volume, P/E, P/B, 52W range, dividend yield |
-| `get_kline(ticker, days, kline_type)` | OHLCV candlestick data (default 180 days, daily) |
-| `get_plate_list(market)` | All industry sector plates for a market |
-| `get_plate_stocks(plate_code)` | All stocks in a sector plate |
-| `get_plate_for_stock(ticker)` | Which plates a stock belongs to |
-| `get_multi_snapshot(tickers)` | Batch snapshots for peer comparison |
+| Tool | MooMoo fallback | Description |
+|---|---|---|
+| `get_snapshot(ticker)` | yfinance `Ticker.info` | Price, volume, P/E, P/B, 52W range, dividend yield |
+| `get_kline(ticker, days, kline_type)` | yfinance `download()` | OHLCV candlestick data (default 180 days, daily) |
+| `get_plate_list(market)` | none | All industry sector plates for a market |
+| `get_plate_stocks(plate_code)` | none | All stocks in a sector plate |
+| `get_plate_for_stock(ticker)` | yfinance sector + curated peers | Which plates/sector a stock belongs to |
+| `get_multi_snapshot(tickers)` | yfinance per-ticker | Batch snapshots for peer comparison |
 
 ### `financials_server` — Fundamental data
 

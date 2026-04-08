@@ -6,6 +6,10 @@ moomoo:
   market: "US"           # US, HK, CN
   default_kline_days: 180
   default_kline_type: "K_DAY"
+  # When MooMoo returns a permission error ("No right to get the quote") or
+  # is unreachable, the orchestrator and moomoo_server automatically fall
+  # back to yfinance for snapshot and K-line data.  The "source" field in
+  # every response indicates which backend was actually used.
 
 report:
   output_dir: "outputs"
@@ -16,6 +20,7 @@ report:
     - technical_indicators
     - fundamentals
     - sector_comparison
+    - sector_relative_performance   # indexed line chart vs peers + benchmark
     - performance_benchmark
     - sentiment_news
 
@@ -29,9 +34,12 @@ technical:
   bollinger_std: 2
 
 performance:
+  # Benchmark indices used in performance comparison tables and charts.
+  # HK stocks -> ^HSI (Hang Seng Index)
+  # US stocks -> SPY  (S&P 500 ETF; preferred over ^GSPC as a tradeable instrument)
   benchmark_indices:
-    - "US.SPY"      # S&P 500
-    - "US.QQQ"      # NASDAQ 100
+    HK: "^HSI"
+    US: "SPY"
   comparison_periods:
     - label: "1M"
       days: 30

@@ -32,17 +32,61 @@ _HK_SECTOR_PEERS: dict[str, list[str]] = {
 }
 
 _US_SECTOR_PEERS: dict[str, list[str]] = {
-    "Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "INTC", "QCOM", "TXN"],
-    "Communication Services": ["GOOGL", "META", "NFLX", "DIS", "CMCSA", "T", "VZ", "SNAP"],
-    "Consumer Cyclical": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW", "TGT", "BKNG"],
-    "Financial Services": ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "AXP", "C"],
-    "Healthcare": ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "DHR", "PFE", "BMY"],
-    "Industrials": ["GE", "CAT", "HON", "UPS", "BA", "RTX", "LMT", "MMM", "DE", "FDX"],
-    "Energy": ["XOM", "CVX", "COP", "EOG", "SLB", "MPC", "PSX", "VLO", "OXY", "HAL"],
-    "Real Estate": ["PLD", "AMT", "EQIX", "CCI", "PSA", "O", "WELL", "DLR", "SPG", "EXR"],
-    "Consumer Defensive": ["WMT", "PG", "KO", "PEP", "COST", "PM", "MO", "CL", "GIS", "KMB"],
-    "Utilities": ["NEE", "DUK", "SO", "D", "EXC", "SRE", "AEP", "PCG", "ED", "ES"],
-    "Basic Materials": ["LIN", "APD", "SHW", "FCX", "NEM", "DOW", "DD", "PPG", "ALB", "CF"],
+    # Large-cap tech: semiconductors, software, cloud, hardware
+    "Technology": [
+        "AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "INTC",
+        "QCOM", "TXN", "AMAT", "MU", "KLAC", "LRCX", "ADBE", "NOW",
+    ],
+    # Mega-cap media, telco, streaming
+    "Communication Services": [
+        "GOOGL", "META", "NFLX", "DIS", "CMCSA", "T", "VZ",
+        "SNAP", "PINS", "SPOT", "PARA", "WBD", "EA", "TTWO",
+    ],
+    # E-commerce, autos, restaurants, retail, travel
+    "Consumer Cyclical": [
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW",
+        "TGT", "BKNG", "UBER", "LYFT", "F", "GM", "RIVN", "DASH",
+    ],
+    # Banks, insurers, payment networks, brokers
+    "Financial Services": [
+        "BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS",
+        "MS", "AXP", "C", "SCHW", "BLK", "SPGI", "CB", "PGR",
+    ],
+    # Pharma, biotech, medtech, managed care
+    "Healthcare": [
+        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT",
+        "DHR", "PFE", "BMY", "AMGN", "GILD", "ISRG", "BSX", "SYK",
+    ],
+    # Aerospace, defense, machinery, logistics
+    "Industrials": [
+        "GE", "CAT", "HON", "UPS", "BA", "RTX", "LMT",
+        "MMM", "DE", "FDX", "NOC", "GD", "EMR", "ETN", "PH",
+    ],
+    # Integrated, E&P, refining, services
+    "Energy": [
+        "XOM", "CVX", "COP", "EOG", "SLB", "MPC", "PSX",
+        "VLO", "OXY", "HAL", "PXD", "HES", "DVN", "WMB", "KMI",
+    ],
+    # REITs: industrial, cell towers, data centers, retail
+    "Real Estate": [
+        "PLD", "AMT", "EQIX", "CCI", "PSA", "O", "WELL",
+        "DLR", "SPG", "EXR", "VICI", "AVB", "EQR", "MAA", "WY",
+    ],
+    # Staples: food, beverage, tobacco, household products
+    "Consumer Defensive": [
+        "WMT", "PG", "KO", "PEP", "COST", "PM", "MO",
+        "CL", "GIS", "KMB", "KHC", "STZ", "HSY", "MKC", "SJM",
+    ],
+    # Electric, gas, multi-utility
+    "Utilities": [
+        "NEE", "DUK", "SO", "D", "EXC", "SRE", "AEP",
+        "PCG", "ED", "ES", "WEC", "ETR", "PPL", "EIX", "AES",
+    ],
+    # Chemicals, metals, mining, packaging
+    "Basic Materials": [
+        "LIN", "APD", "SHW", "FCX", "NEM", "DOW", "DD",
+        "PPG", "ALB", "CF", "NUE", "STLD", "AA", "BLL", "IP",
+    ],
 }
 
 

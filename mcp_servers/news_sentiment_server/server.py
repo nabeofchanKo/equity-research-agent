@@ -194,22 +194,42 @@ def get_news(ticker: str, days: int = 7) -> str:
         })
 
     # Filter by age
-    now_ts = datetime.now(tz=timezone.utc).timestamp()
-    cutoff = now_ts - days * 86400
+    cutoff_dt = datetime.now(tz=timezone.utc) - __import__("datetime").timedelta(days=days)
+
+    def _parse_news_item(item: dict):
+        """Parse a yfinance news item in either old or new API format."""
+        content = item.get("content")
+        if isinstance(content, dict):
+            # New format (yfinance 0.2.50+): {"id": ..., "content": {...}}
+            title  = content.get("title", "")
+            publisher = (content.get("provider") or {}).get("displayName", "")
+            link   = ((content.get("canonicalUrl") or content.get("clickThroughUrl")) or {}).get("url", "")
+            pub_date_str = content.get("pubDate", "")
+            try:
+                pub_dt = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                pub_dt = None
+        else:
+            # Old format: {"title": ..., "publisher": ..., "providerPublishTime": <ts>}
+            title     = item.get("title", "")
+            publisher = item.get("publisher", "")
+            link      = item.get("link", "")
+            ts = item.get("providerPublishTime") or item.get("publishTime") or 0
+            pub_dt = datetime.fromtimestamp(int(ts), tz=timezone.utc) if ts else None
+
+        if not title:
+            return None
+        if pub_dt and pub_dt < cutoff_dt:
+            return None
+        date_str = pub_dt.strftime("%Y-%m-%d") if pub_dt else ""
+        return {"title": title, "publisher": publisher, "link": link,
+                "date": date_str, "sentiment": _score_title(title)}
 
     articles = []
     for item in raw_news:
-        pub_ts = item.get("providerPublishTime") or item.get("publishTime") or 0
-        if pub_ts and pub_ts < cutoff:
-            continue
-        title = item.get("title", "")
-        articles.append({
-            "title":     title,
-            "publisher": item.get("publisher", ""),
-            "link":      item.get("link", ""),
-            "date":      _ts_to_iso(pub_ts) if pub_ts else "",
-            "sentiment": _score_title(title),
-        })
+        parsed = _parse_news_item(item)
+        if parsed:
+            articles.append(parsed)
 
     return json.dumps({
         "ticker": ticker,

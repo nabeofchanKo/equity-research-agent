@@ -4,6 +4,11 @@ Orchestrator for moomoo-dashboard report generation.
 Collects data from MooMoo OpenD and yfinance directly (no MCP required),
 runs technical analysis, and generates the HTML report.
 
+MooMoo OpenD is the primary source for snapshot and K-line data.  When
+MooMoo returns a permission error ("No right") or is not reachable, the
+orchestrator automatically falls back to yfinance for those data points and
+logs a warning.
+
 Usage:
     python -m src.orchestrator HK.00700
     python -m src.orchestrator US.AAPL
@@ -61,6 +66,21 @@ def normalise_ticker(raw: str) -> str:
     return t
 
 
+# Error substrings that indicate a MooMoo permission/access failure
+_MOOMOO_PERM_ERRORS = (
+    "no right",
+    "no permission",
+    "permission",
+    "quota",
+    "subscription",
+)
+
+
+def _is_moomoo_perm_error(msg: str) -> bool:
+    lower = str(msg).lower()
+    return any(t in lower for t in _MOOMOO_PERM_ERRORS)
+
+
 # ---------------------------------------------------------------------------
 # MooMoo data collection
 # ---------------------------------------------------------------------------
@@ -69,7 +89,9 @@ def _collect_moomoo(ticker: str, cfg: dict) -> dict:
     """
     Collect snapshot and K-line data directly from MooMoo OpenD.
     Returns dict with keys: snapshot, kline_records.
-    Raises RuntimeError if OpenD is unreachable.
+    Raises RuntimeError if OpenD is unreachable or returns a non-permission error.
+    Raises PermissionError (subclass of RuntimeError) for access/right errors
+    so the caller can choose to fall back to yfinance.
     """
     import moomoo as ft
 
@@ -84,25 +106,29 @@ def _collect_moomoo(ticker: str, cfg: dict) -> dict:
         # ── Snapshot ──────────────────────────────────────────────────────
         ret, data = ctx.get_market_snapshot([ticker])
         if ret != ft.RET_OK:
-            raise RuntimeError(f"get_market_snapshot failed: {data}")
+            msg = str(data)
+            if _is_moomoo_perm_error(msg):
+                raise PermissionError(f"get_market_snapshot failed: {msg}")
+            raise RuntimeError(f"get_market_snapshot failed: {msg}")
         snap_records = json.loads(data.to_json(orient="records", date_format="iso"))
         if not snap_records:
             raise RuntimeError(f"No snapshot data for {ticker}")
         row = snap_records[0]
         snapshot = {
-            "ticker":            ticker,
-            "name":              row.get("name", ""),
-            "last_price":        row.get("last_price"),
-            "change_val":        row.get("change_val"),
-            "change_rate":       row.get("change_rate"),
-            "volume":            row.get("volume"),
-            "turnover":          row.get("turnover"),
-            "market_cap":        row.get("market_cap"),
-            "pe_ratio":          row.get("pe_ratio"),
-            "pb_ratio":          row.get("pb_ratio"),
-            "52w_high":          row.get("high_price_52weeks"),
-            "52w_low":           row.get("low_price_52weeks"),
-            "dividend_yield":    row.get("dividend_yield"),
+            "ticker":         ticker,
+            "name":           row.get("name", ""),
+            "last_price":     row.get("last_price"),
+            "change_val":     row.get("change_val"),
+            "change_rate":    row.get("change_rate"),
+            "volume":         row.get("volume"),
+            "turnover":       row.get("turnover"),
+            "market_cap":     row.get("market_cap"),
+            "pe_ratio":       row.get("pe_ratio"),
+            "pb_ratio":       row.get("pb_ratio"),
+            "52w_high":       row.get("high_price_52weeks"),
+            "52w_low":        row.get("low_price_52weeks"),
+            "dividend_yield": row.get("dividend_yield"),
+            "source":         "moomoo",
         }
 
         # ── K-line ────────────────────────────────────────────────────────
@@ -122,7 +148,10 @@ def _collect_moomoo(ticker: str, cfg: dict) -> dict:
             fields=fields, max_count=1000,
         )
         if ret2 != ft.RET_OK:
-            logger.warning("get_history_kline failed: %s — continuing without K-line", kdata)
+            msg2 = str(kdata)
+            if _is_moomoo_perm_error(msg2):
+                raise PermissionError(f"get_history_kline failed: {msg2}")
+            logger.warning("get_history_kline failed: %s — continuing without K-line", msg2)
             kline_records = []
         else:
             kline_records = json.loads(kdata.to_json(orient="records", date_format="iso"))
@@ -130,7 +159,70 @@ def _collect_moomoo(ticker: str, cfg: dict) -> dict:
     finally:
         ctx.close()
 
-    return {"snapshot": snapshot, "kline_records": kline_records}
+    return {"snapshot": snapshot, "kline_records": kline_records, "source": "moomoo"}
+
+
+def _collect_moomoo_yf(ticker: str, cfg: dict) -> dict:
+    """
+    yfinance fallback for snapshot + K-line when MooMoo is unavailable.
+    Returns same dict shape as _collect_moomoo with source="yfinance".
+    """
+    import yfinance as yf
+    from datetime import date, timedelta
+
+    days     = int(cfg.get("moomoo", {}).get("default_kline_days", 180))
+    yf_code  = moomoo_to_yfinance(ticker)
+    logger.info("yfinance fallback: fetching snapshot+kline for %s (yf: %s)", ticker, yf_code)
+
+    info = yf.Ticker(yf_code).info
+    price      = info.get("currentPrice") or info.get("regularMarketPrice")
+    prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
+    change_val  = (price - prev_close) if (price and prev_close) else None
+    change_rate = (change_val / prev_close * 100) if (change_val and prev_close) else None
+
+    snapshot = {
+        "ticker":         ticker,
+        "name":           info.get("longName") or info.get("shortName", ""),
+        "last_price":     price,
+        "change_val":     change_val,
+        "change_rate":    change_rate,
+        "volume":         info.get("regularMarketVolume") or info.get("volume"),
+        "turnover":       None,
+        "market_cap":     info.get("marketCap"),
+        "pe_ratio":       info.get("trailingPE"),
+        "pb_ratio":       info.get("priceToBook"),
+        "52w_high":       info.get("fiftyTwoWeekHigh"),
+        "52w_low":        info.get("fiftyTwoWeekLow"),
+        "dividend_yield": info.get("dividendYield"),
+        "source":         "yfinance",
+    }
+
+    end_date   = date.today()
+    start_date = end_date - timedelta(days=days)
+    hist = yf.download(
+        yf_code,
+        start=str(start_date), end=str(end_date),
+        auto_adjust=True, progress=False,
+    )
+    kline_records = []
+    if not hist.empty:
+        if hasattr(hist.columns, "levels"):
+            hist.columns = hist.columns.get_level_values(0)
+        for ts, row in hist.iterrows():
+            kline_records.append({
+                "time_key":    str(ts.date()) + " 00:00:00",
+                "open":        float(row["Open"]),
+                "high":        float(row["High"]),
+                "low":         float(row["Low"]),
+                "close":       float(row["Close"]),
+                "volume":      int(row["Volume"]),
+                "turnover":    None,
+                "change_rate": None,
+                "last_close":  None,
+                "pe_ratio":    None,
+            })
+
+    return {"snapshot": snapshot, "kline_records": kline_records, "source": "yfinance"}
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +358,7 @@ def _collect_financials(ticker: str) -> dict:
     # ── Performance ───────────────────────────────────────────────────────────
     import pandas as pd
     from datetime import timedelta as _td
-    bench = "^HSI" if yf_code.endswith(".HK") else "^GSPC"
+    bench = "^HSI" if yf_code.endswith(".HK") else "SPY"
     today = _date.today()
     perf_rows: list[dict] = []
     try:
@@ -313,6 +405,7 @@ def _collect_news(ticker: str, days: int = 7) -> Optional[dict]:
     """
     Fetch and score news. Returns None on any error.
     """
+    import yfinance as yf
     yf_code = moomoo_to_yfinance(ticker)
     from datetime import datetime, timezone, timedelta
     import re as _re
@@ -326,7 +419,7 @@ def _collect_news(ticker: str, days: int = 7) -> Optional[dict]:
     if not raw:
         return {"score": 0.0, "label": "Neutral", "articles": []}
 
-    cutoff_ts = (datetime.now(tz=timezone.utc) - timedelta(days=days)).timestamp()
+    cutoff_dt = datetime.now(tz=timezone.utc) - timedelta(days=days)
 
     pos_kw = {"surge","surges","surged","rally","rallied","beat","beats","upgrade","upgraded",
                "outperform","growth","profit","record","bullish","gain","rise","high","strong",
@@ -346,20 +439,47 @@ def _collect_news(ticker: str, days: int = 7) -> Optional[dict]:
         total = p + n
         return round(max(-1.0, min(1.0, (p - n) / total)), 4) if total else 0.0
 
+    def _parse_item(item: dict) -> Optional[dict]:
+        """Parse a yfinance news item — handles both old and new API formats."""
+        # New format (yfinance 0.2.50+): item = {"id": ..., "content": {...}}
+        content = item.get("content")
+        if isinstance(content, dict):
+            title  = content.get("title", "")
+            source = (content.get("provider") or {}).get("displayName", "")
+            url    = ((content.get("canonicalUrl") or content.get("clickThroughUrl")) or {}).get("url", "")
+            pub_date_str = content.get("pubDate", "")
+            # pubDate is ISO 8601 string like "2026-04-07T19:34:28Z"
+            try:
+                pub_dt = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                pub_dt = None
+        else:
+            # Old format: item = {"title": ..., "publisher": ..., "providerPublishTime": <unix ts>}
+            title  = item.get("title", "")
+            source = item.get("publisher", "")
+            url    = item.get("link", "")
+            ts = item.get("providerPublishTime") or item.get("publishTime") or 0
+            pub_dt = datetime.fromtimestamp(int(ts), tz=timezone.utc) if ts else None
+
+        if not title:
+            return None
+        if pub_dt and pub_dt < cutoff_dt:
+            return None
+
+        date_str = pub_dt.strftime("%Y-%m-%d") if pub_dt else ""
+        return {
+            "title":     title,
+            "source":    source,
+            "date":      date_str,
+            "url":       url,
+            "sentiment": _score(title),
+        }
+
     articles = []
     for item in raw:
-        ts = item.get("providerPublishTime") or item.get("publishTime") or 0
-        if ts and ts < cutoff_ts:
-            continue
-        title = item.get("title", "")
-        score = _score(title)
-        articles.append({
-            "title":     title,
-            "source":    item.get("publisher", ""),
-            "date":      datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d") if ts else "",
-            "url":       item.get("link", ""),
-            "sentiment": score,
-        })
+        parsed = _parse_item(item)
+        if parsed:
+            articles.append(parsed)
 
     overall = round(sum(a["sentiment"] for a in articles) / len(articles), 4) if articles else 0.0
     label = "Positive" if overall >= 0.3 else ("Negative" if overall <= -0.3 else "Neutral")
@@ -408,15 +528,34 @@ def run(ticker_raw: str, output_dir: str = "outputs") -> str:
     ticker = normalise_ticker(ticker_raw)
     logger.info("Starting pipeline for %s", ticker)
 
-    # ── 1. MooMoo market data ─────────────────────────────────────────────
+    # ── 1. Market data (MooMoo primary → yfinance fallback) ──────────────
+    data_source = "moomoo"
     try:
         moomoo_data = _collect_moomoo(ticker, cfg)
+    except PermissionError as exc:
+        logger.warning(
+            "MooMoo permission error for %s — falling back to yfinance: %s", ticker, exc
+        )
+        try:
+            moomoo_data = _collect_moomoo_yf(ticker, cfg)
+            data_source = "yfinance"
+        except Exception as yf_exc:
+            logger.error("yfinance fallback also failed: %s", yf_exc)
+            raise RuntimeError(
+                f"Both MooMoo and yfinance failed for {ticker}. "
+                f"MooMoo: {exc} | yfinance: {yf_exc}"
+            ) from yf_exc
     except Exception as exc:
         logger.error("MooMoo data collection failed: %s", exc)
         raise RuntimeError(
-            f"Could not connect to MooMoo OpenD for {ticker}. "
-            "Ensure OpenD is running on 127.0.0.1:11111."
+            f"Could not collect market data for {ticker}. "
+            f"Ensure OpenD is running on 127.0.0.1:11111 or check network. Error: {exc}"
         ) from exc
+
+    if data_source == "yfinance":
+        logger.info("Market data source: yfinance (MooMoo unavailable)")
+    else:
+        logger.info("Market data source: moomoo")
 
     snapshot      = moomoo_data["snapshot"]
     kline_records = moomoo_data["kline_records"]
@@ -462,16 +601,17 @@ def run(ticker_raw: str, output_dir: str = "outputs") -> str:
     price = snapshot.get("last_price") or technicals.get("latest_price") or "N/A"
     chg   = snapshot.get("change_rate") or 0.0
 
-    print(f"\n{'━'*48}")
-    print(f"  {ticker} — {snapshot.get('name', '')}")
-    print(f"{'━'*48}")
+    sep = "-" * 48
+    print(f"\n{sep}")
+    print(f"  {ticker} - {snapshot.get('name', '')}")
+    print(f"{sep}")
     print(f"  Report : {path}")
     print(f"  Price  : {price}  ({'+' if chg >= 0 else ''}{chg:.2f}%)")
     print(f"  Signal : {sig}  (score {score:+.2f})")
     rsi_v = technicals.get("rsi", {}).get("value")
     if rsi_v:
         print(f"  RSI    : {rsi_v:.1f}")
-    print(f"{'━'*48}\n")
+    print(f"{sep}\n")
 
     return path
 

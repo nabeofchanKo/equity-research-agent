@@ -83,8 +83,12 @@ def _round(val: Any, ndigits: int = 4) -> Any:
 
 
 def _default_benchmark(yf_ticker: str) -> str:
-    """Return the most relevant benchmark index for a ticker."""
-    return "^HSI" if yf_ticker.endswith(".HK") else "^GSPC"
+    """Return the most relevant benchmark for a ticker.
+
+    HK stocks → ^HSI (Hang Seng Index)
+    US stocks → SPY  (S&P 500 ETF; preferred over ^GSPC as it is tradeable)
+    """
+    return "^HSI" if yf_ticker.endswith(".HK") else "SPY"
 
 
 # ---------------------------------------------------------------------------
@@ -321,8 +325,8 @@ def get_performance(
 
     Args:
         ticker:    Ticker in MooMoo or yfinance format.
-        benchmark: yfinance benchmark ticker (e.g. "^HSI", "^GSPC", "^IXIC").
-                   Defaults to ^HSI for HK stocks, ^GSPC for US stocks.
+        benchmark: yfinance benchmark ticker (e.g. "^HSI", "SPY", "^IXIC").
+                   Defaults to ^HSI for HK stocks, SPY for US stocks.
     """
     yf_code = _to_yf(ticker)
     bench = benchmark or _default_benchmark(yf_code)

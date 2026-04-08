@@ -163,6 +163,24 @@ class TestNormalizeTicker:
 # get_snapshot — unit tests
 # ---------------------------------------------------------------------------
 
+def _mock_yf_info(ticker):
+    """Minimal yfinance Ticker stub for fallback tests."""
+    mock = MagicMock()
+    mock.info = {
+        "longName": "Tencent Holdings",
+        "currentPrice": 385.0,
+        "regularMarketPreviousClose": 381.6,
+        "regularMarketVolume": 12_000_000,
+        "marketCap": 3_700_000_000_000,
+        "trailingPE": 18.5,
+        "priceToBook": 3.1,
+        "fiftyTwoWeekHigh": 430.0,
+        "fiftyTwoWeekLow": 260.0,
+        "dividendYield": 0.0055,
+    }
+    return mock
+
+
 class TestGetSnapshot:
     def test_success_returns_expected_fields(self):
         ctx_mock = _make_ctx_mock()
@@ -178,16 +196,39 @@ class TestGetSnapshot:
         assert result["52w_low"] == 260.0
         assert result["dividend_yield"] == 0.55
 
+    def test_success_includes_source_moomoo(self):
+        ctx_mock = _make_ctx_mock()
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
+            result = json.loads(get_snapshot("HK.00700"))
+        assert result.get("source") == "moomoo"
+
     def test_auto_prefix_applied(self):
         ctx_mock = _make_ctx_mock()
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             get_snapshot("00700")
-        # verify the ctx was called with the normalised code
         ctx_mock.get_market_snapshot.assert_called_once_with(["HK.00700"])
 
-    def test_api_error_returns_error_json(self):
+    def test_permission_error_falls_back_to_yfinance(self):
         import moomoo as ft
-        ctx_mock = _make_ctx_mock(snapshot_ret=(ft.RET_ERROR, "quota exceeded"))
+        import yfinance as yf
+        ctx_mock = _make_ctx_mock(snapshot_ret=(ft.RET_ERROR, "No right to get the quote"))
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
+            with patch.object(yf, "Ticker", return_value=_mock_yf_info("HK.00700")):
+                result = json.loads(get_snapshot("HK.00700"))
+        assert result.get("source") == "yfinance"
+        assert result["last_price"] == 385.0
+
+    def test_connection_error_falls_back_to_yfinance(self):
+        import yfinance as yf
+        with patch.object(moomoo_server, "_quote_ctx", side_effect=ConnectionError("refused")):
+            with patch.object(yf, "Ticker", return_value=_mock_yf_info("HK.00700")):
+                result = json.loads(get_snapshot("HK.00700"))
+        assert result.get("source") == "yfinance"
+
+    def test_non_permission_api_error_returns_error_json(self):
+        """Non-permission API errors (e.g. symbol not found) should NOT fall back."""
+        import moomoo as ft
+        ctx_mock = _make_ctx_mock(snapshot_ret=(ft.RET_ERROR, "symbol not found"))
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_snapshot("HK.00700"))
         assert "error" in result
@@ -197,12 +238,6 @@ class TestGetSnapshot:
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_snapshot("HK.00700"))
         assert "error" in result
-
-    def test_connection_error_returns_error_json(self):
-        with patch.object(moomoo_server, "_quote_ctx", side_effect=ConnectionError("refused")):
-            result = json.loads(get_snapshot("HK.00700"))
-        assert "error" in result
-        assert "OpenD" in result["error"]
 
     def test_ctx_is_closed_on_success(self):
         ctx_mock = _make_ctx_mock()
@@ -215,6 +250,17 @@ class TestGetSnapshot:
 # get_kline — unit tests
 # ---------------------------------------------------------------------------
 
+def _mock_yf_download(*args, **kwargs):
+    """Minimal yf.download stub returning 2 rows."""
+    import numpy as np
+    idx = pd.date_range("2024-01-02", periods=2, freq="B")
+    return pd.DataFrame({
+        "Open": [370.0, 375.0], "High": [378.0, 382.0],
+        "Low": [368.0, 373.0], "Close": [375.0, 380.0],
+        "Volume": [8_000_000, 9_200_000],
+    }, index=idx)
+
+
 class TestGetKline:
     def test_success_returns_records(self):
         ctx_mock = _make_ctx_mock()
@@ -225,6 +271,12 @@ class TestGetKline:
         assert result["kline_type"] == "K_DAY"
         assert len(result["records"]) == 2
         assert result["records"][0]["close"] == 375.0
+
+    def test_success_includes_source_moomoo(self):
+        ctx_mock = _make_ctx_mock()
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
+            result = json.loads(get_kline("HK.00700"))
+        assert result.get("source") == "moomoo"
 
     def test_default_kline_type_is_k_day(self):
         ctx_mock = _make_ctx_mock()
@@ -242,15 +294,27 @@ class TestGetKline:
         _, call_kwargs = ctx_mock.get_history_kline.call_args
         assert call_kwargs.get("ktype") == ft.KLType.K_DAY
 
-    def test_api_error_returns_error_json(self):
+    def test_permission_error_falls_back_to_yfinance(self):
         import moomoo as ft
-        ctx_mock = _make_ctx_mock(kline_ret=(ft.RET_ERROR, "not subscribed", None))
+        import yfinance as yf
+        ctx_mock = _make_ctx_mock(kline_ret=(ft.RET_ERROR, "No right to get the quote", None))
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
-            result = json.loads(get_kline("HK.00700"))
-        assert "error" in result
+            with patch.object(yf, "download", side_effect=_mock_yf_download):
+                result = json.loads(get_kline("HK.00700"))
+        assert result.get("source") == "yfinance"
+        assert len(result["records"]) == 2
 
-    def test_connection_error_returns_error_json(self):
+    def test_connection_error_falls_back_to_yfinance(self):
+        import yfinance as yf
         with patch.object(moomoo_server, "_quote_ctx", side_effect=OSError("timeout")):
+            with patch.object(yf, "download", side_effect=_mock_yf_download):
+                result = json.loads(get_kline("HK.00700"))
+        assert result.get("source") == "yfinance"
+
+    def test_non_permission_api_error_returns_error_json(self):
+        import moomoo as ft
+        ctx_mock = _make_ctx_mock(kline_ret=(ft.RET_ERROR, "symbol not found", None))
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_kline("HK.00700"))
         assert "error" in result
 
@@ -276,6 +340,12 @@ class TestGetPlateList:
         assert len(result["plates"]) == 2
         assert result["plates"][0]["plate_name"] == "Technology"
 
+    def test_success_includes_source_moomoo(self):
+        ctx_mock = _make_ctx_mock()
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
+            result = json.loads(get_plate_list("HK"))
+        assert result.get("source") == "moomoo"
+
     def test_defaults_to_hk_market(self):
         ctx_mock = _make_ctx_mock()
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
@@ -286,20 +356,21 @@ class TestGetPlateList:
         ctx_mock = _make_ctx_mock()
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_plate_list("XX"))
-        # Should not error; falls back to HK
         assert "plates" in result
 
-    def test_api_error_returns_error_json(self):
+    def test_api_error_returns_error_with_moomoo_only_source(self):
         import moomoo as ft
         ctx_mock = _make_ctx_mock(plate_list_ret=(ft.RET_ERROR, "error"))
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_plate_list("HK"))
         assert "error" in result
+        assert result.get("source") == "moomoo_only"
 
-    def test_connection_error_returns_error_json(self):
+    def test_connection_error_returns_error_with_moomoo_only_source(self):
         with patch.object(moomoo_server, "_quote_ctx", side_effect=ConnectionRefusedError):
             result = json.loads(get_plate_list("HK"))
         assert "error" in result
+        assert result.get("source") == "moomoo_only"
 
 
 # ---------------------------------------------------------------------------
@@ -316,28 +387,42 @@ class TestGetPlateStocks:
         assert len(result["stocks"]) == 3
         assert result["stocks"][0]["code"] == "HK.00700"
 
+    def test_success_includes_source_moomoo(self):
+        ctx_mock = _make_ctx_mock()
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
+            result = json.loads(get_plate_stocks("HK.BK1001"))
+        assert result.get("source") == "moomoo"
+
     def test_plate_code_is_uppercased(self):
         ctx_mock = _make_ctx_mock()
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             get_plate_stocks("hk.bk1001")
         ctx_mock.get_plate_stock.assert_called_once_with("HK.BK1001")
 
-    def test_api_error_returns_error_json(self):
+    def test_api_error_returns_error_with_moomoo_only_source(self):
         import moomoo as ft
         ctx_mock = _make_ctx_mock(plate_stocks_ret=(ft.RET_ERROR, "not found"))
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_plate_stocks("HK.BK9999"))
         assert "error" in result
+        assert result.get("source") == "moomoo_only"
 
-    def test_connection_error_returns_error_json(self):
+    def test_connection_error_returns_error_with_moomoo_only_source(self):
         with patch.object(moomoo_server, "_quote_ctx", side_effect=Exception("no OpenD")):
             result = json.loads(get_plate_stocks("HK.BK1001"))
         assert "error" in result
+        assert result.get("source") == "moomoo_only"
 
 
 # ---------------------------------------------------------------------------
 # get_plate_for_stock — unit tests
 # ---------------------------------------------------------------------------
+
+def _mock_yf_ticker_sector(ticker):
+    mock = MagicMock()
+    mock.info = {"sector": "Technology", "industry": "Internet Content & Information"}
+    return mock
+
 
 class TestGetPlateForStock:
     def test_success_returns_plates(self):
@@ -349,21 +434,40 @@ class TestGetPlateForStock:
         assert len(result["plates"]) == 1
         assert result["plates"][0]["plate_name"] == "Technology"
 
+    def test_success_includes_source_moomoo(self):
+        ctx_mock = _make_ctx_mock()
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
+            result = json.loads(get_plate_for_stock("HK.00700"))
+        assert result.get("source") == "moomoo"
+
     def test_auto_prefix_applied(self):
         ctx_mock = _make_ctx_mock()
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             get_plate_for_stock("00700")
         ctx_mock.get_owner_plate.assert_called_once_with(["HK.00700"])
 
-    def test_owner_plate_error_returns_error_json(self):
+    def test_permission_error_falls_back_to_yfinance(self):
         import moomoo as ft
-        ctx_mock = _make_ctx_mock(owner_plate_ret=(ft.RET_ERROR, "no data"))
+        import yfinance as yf
+        ctx_mock = _make_ctx_mock(owner_plate_ret=(ft.RET_ERROR, "No right to get the quote"))
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
-            result = json.loads(get_plate_for_stock("HK.00700"))
-        assert "error" in result
+            with patch.object(yf, "Ticker", return_value=_mock_yf_ticker_sector("HK.00700")):
+                result = json.loads(get_plate_for_stock("HK.00700"))
+        assert result.get("source") == "yfinance"
+        assert result["sector"] == "Technology"
+        assert "suggested_peers" in result
 
-    def test_connection_error_returns_error_json(self):
+    def test_connection_error_falls_back_to_yfinance(self):
+        import yfinance as yf
         with patch.object(moomoo_server, "_quote_ctx", side_effect=OSError("refused")):
+            with patch.object(yf, "Ticker", return_value=_mock_yf_ticker_sector("HK.00700")):
+                result = json.loads(get_plate_for_stock("HK.00700"))
+        assert result.get("source") == "yfinance"
+
+    def test_non_permission_api_error_returns_error_json(self):
+        import moomoo as ft
+        ctx_mock = _make_ctx_mock(owner_plate_ret=(ft.RET_ERROR, "symbol not found"))
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_plate_for_stock("HK.00700"))
         assert "error" in result
 
@@ -373,7 +477,7 @@ class TestGetPlateForStock:
 # ---------------------------------------------------------------------------
 
 class TestGetMultiSnapshot:
-    def test_success_returns_list(self):
+    def test_success_returns_snapshots_wrapper(self):
         multi_df = pd.DataFrame([
             {
                 "code": "HK.00700", "name": "Tencent",
@@ -398,9 +502,10 @@ class TestGetMultiSnapshot:
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_multi_snapshot(["HK.00700", "HK.09988"]))
 
-        assert isinstance(result, list)
-        assert len(result) == 2
-        tickers = {r["ticker"] for r in result}
+        assert "snapshots" in result
+        assert result.get("source") == "moomoo"
+        assert len(result["snapshots"]) == 2
+        tickers = {r["ticker"] for r in result["snapshots"]}
         assert tickers == {"HK.00700", "HK.09988"}
 
     def test_each_record_has_required_keys(self):
@@ -408,7 +513,13 @@ class TestGetMultiSnapshot:
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_multi_snapshot(["HK.00700"]))
         required = {"ticker", "name", "last_price", "change_rate", "pe_ratio", "pb_ratio"}
-        assert required.issubset(result[0].keys())
+        assert required.issubset(result["snapshots"][0].keys())
+
+    def test_each_snapshot_record_has_source_field(self):
+        ctx_mock = _make_ctx_mock()
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
+            result = json.loads(get_multi_snapshot(["HK.00700"]))
+        assert result["snapshots"][0].get("source") == "moomoo"
 
     def test_empty_list_returns_error_json(self):
         result = json.loads(get_multi_snapshot([]))
@@ -420,15 +531,27 @@ class TestGetMultiSnapshot:
             get_multi_snapshot(["00700", "09988"])
         ctx_mock.get_market_snapshot.assert_called_once_with(["HK.00700", "HK.09988"])
 
-    def test_api_error_returns_error_json(self):
+    def test_permission_error_falls_back_to_yfinance(self):
         import moomoo as ft
-        ctx_mock = _make_ctx_mock(snapshot_ret=(ft.RET_ERROR, "limit reached"))
+        import yfinance as yf
+        ctx_mock = _make_ctx_mock(snapshot_ret=(ft.RET_ERROR, "No right to get the quote"))
         with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
-            result = json.loads(get_multi_snapshot(["HK.00700"]))
-        assert "error" in result
+            with patch.object(yf, "Ticker", return_value=_mock_yf_info("HK.00700")):
+                result = json.loads(get_multi_snapshot(["HK.00700"]))
+        assert result.get("source") == "yfinance"
+        assert len(result["snapshots"]) == 1
 
-    def test_connection_error_returns_error_json(self):
+    def test_connection_error_falls_back_to_yfinance(self):
+        import yfinance as yf
         with patch.object(moomoo_server, "_quote_ctx", side_effect=Exception("OpenD down")):
+            with patch.object(yf, "Ticker", return_value=_mock_yf_info("HK.00700")):
+                result = json.loads(get_multi_snapshot(["HK.00700"]))
+        assert result.get("source") == "yfinance"
+
+    def test_non_permission_api_error_returns_error_json(self):
+        import moomoo as ft
+        ctx_mock = _make_ctx_mock(snapshot_ret=(ft.RET_ERROR, "symbol not found"))
+        with patch.object(moomoo_server, "_quote_ctx", return_value=ctx_mock):
             result = json.loads(get_multi_snapshot(["HK.00700"]))
         assert "error" in result
 

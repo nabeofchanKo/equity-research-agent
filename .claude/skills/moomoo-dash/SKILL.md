@@ -26,9 +26,13 @@ if "." not in ticker:
     ticker = f"HK.{ticker}" if ticker.isnumeric() else f"US.{ticker}"
 ```
 
-### Step 2 — Collect market data (MooMoo MCP)
+### Step 2 — Collect market data (MooMoo MCP, yfinance fallback)
 
-Call these tools. If any fails, log a warning and continue with empty/None for that field.
+Call these tools. MooMoo is the primary source; all tools automatically fall
+back to yfinance when MooMoo returns a permission error or connection error.
+Check the `"source"` field in each response to see which backend was used.
+If any tool returns an `"error"` key and no fallback is possible, log a warning
+and continue with empty/None for that field.
 
 ```
 mcp__moomoo_server__get_snapshot(ticker=ticker)
@@ -36,12 +40,16 @@ mcp__moomoo_server__get_kline(ticker=ticker, days=180, kline_type="K_DAY")
 mcp__moomoo_server__get_plate_for_stock(ticker=ticker)
 ```
 
-From the plate result, take the first plate_code and call:
-```
-mcp__moomoo_server__get_plate_stocks(plate_code=<first_plate_code>)
-```
+From the plate result:
+- If `source == "moomoo"`: take the first plate_code and call:
+  ```
+  mcp__moomoo_server__get_plate_stocks(plate_code=<first_plate_code>)
+  ```
+  From plate_stocks, pick up to 8 peer tickers (exclude the target).
+- If `source == "yfinance"`: the `suggested_peers` field already contains
+  curated peer tickers — use those directly.
 
-From plate_stocks, pick up to 8 peer tickers (exclude the target), then:
+Then fetch snapshots for all identified peers:
 ```
 mcp__moomoo_server__get_multi_snapshot(tickers=[...peer tickers...])
 ```
@@ -152,11 +160,26 @@ After the report is written, display:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
+## Data Sources & Fallback
+
+| Tool / Field | Primary | Automatic Fallback |
+|---|---|---|
+| Snapshot (price, vol, P/E…) | MooMoo OpenD | yfinance `Ticker.info` |
+| K-line / OHLCV | MooMoo OpenD | yfinance `download()` |
+| Sector plate lookup | MooMoo OpenD | yfinance sector + curated peer map |
+| Plate list / plate stocks | MooMoo only | `{"source": "moomoo_only"}` — no fallback |
+| Peer snapshots (multi) | MooMoo OpenD | yfinance per-ticker |
+| Fundamentals | yfinance (primary) | — |
+| Performance benchmark | ^HSI (HK) / SPY (US) via yfinance | — |
+
+Check the `"source"` field in every response (`"moomoo"`, `"yfinance"`, or `"moomoo_only"`).
+
 ## Error Handling
 
 | Failure | Action |
 |---|---|
-| OpenD not running | Error clearly: "MooMoo OpenD is not running. Start OpenD and retry." |
+| OpenD not running | Falls back to yfinance automatically; logs warning |
+| No MooMoo market rights | Falls back to yfinance automatically; logs warning |
 | Ticker not found in snapshot | Warn and try to continue with yfinance-only data |
 | Kline empty / too short | Technicals will be sparse; report still generates |
 | news_sentiment_server offline | Skip sentiment section (report still renders) |
