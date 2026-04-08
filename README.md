@@ -105,6 +105,20 @@ The generated single-file HTML report includes 8 interactive sections:
 
 ---
 
+## Sample Report
+
+A generated report covers 8 sections in a single self-contained HTML file: a header with price and signal gauge, an interactive candlestick chart with SMA / Bollinger Bands / volume, technical indicator panels (RSI, MACD, Stochastic), fundamentals with a quarterly earnings chart, a peer sector comparison table, an indexed sector relative-performance line chart, a benchmark performance table (1M / 3M / 6M / 1Y), and a sentiment gauge with recent news headlines.
+
+The screenshots below are taken from a sample report generated for **HK.00700 (Tencent Holdings)**.
+
+![Sample report 1](docs/sample_report_01.png)
+![Sample report 2](docs/sample_report_02.png)
+![Sample report 3](docs/sample_report_03.png)
+![Sample report 4](docs/sample_report_04.png)
+![Sample report 5](docs/sample_report_05.png)
+
+---
+
 ## MCP Servers
 
 Three MCP servers expose data as tools. They are registered in `.claude.json` and start automatically when Claude Code connects.
