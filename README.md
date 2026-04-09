@@ -109,6 +109,8 @@ The generated single-file HTML report includes 8 interactive sections:
 
 A generated report covers 8 sections in a single self-contained HTML file: a header with price and signal gauge, an interactive candlestick chart with SMA / Bollinger Bands / volume, technical indicator panels (RSI, MACD, Stochastic), fundamentals with a quarterly earnings chart, a peer sector comparison table, an indexed sector relative-performance line chart, a benchmark performance table (1M / 3M / 6M / 1Y), and a sentiment gauge with recent news headlines.
 
+**[View Sample Live Report →](https://natbrian.github.io/auto-research-finance/moomoo-dashboard/outputs/US_AAPL_2026-04-08_report.html)**
+
 The screenshots below are taken from a sample report generated for **HK.00700 (Tencent Holdings)**.
 
 ![Sample report 1](docs/sample_report_01.png)
