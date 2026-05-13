@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime cache & session (keep placeholder .gitkeep)
+data/cache/*
+!data/cache/.gitkeep
+session/*
+!session/.gitkeep
+
+# Generated reports (keep SAMPLE_* for reference)
+outputs/*.html
+!outputs/SAMPLE_*.html
+
+# Claude Code runtime artifacts (skill files in .claude/skills/ are kept)
+.claude/session/
+.claude/local/
+.claude/cache/
+
+# Environment / secrets
+.env
+.env.local
+
+# Logs
+*.log

@@ -1,7 +1,60 @@
-# moomoo-dashboard
+# equity-research-agent
 
-A Claude Code skill that generates **visual equity research reports** powered by MooMoo OpenAPI.  
-Input a ticker → get a comprehensive interactive HTML dashboard with real-time market data, technicals, fundamentals, sector comparison, performance benchmarks, and sentiment analysis.
+*NTU MSc Applied AI · CA6115 course project · solo subproject*
+
+An **MCP-based equity research agent**. Input a ticker → an orchestrated pipeline calls three MCP servers (market data, fundamentals, news + sentiment), runs technical analysis, and produces an 8-section interactive HTML research report. Built as a Claude Code skill, with a parallel standalone CLI mode that runs the full pipeline without Claude or MCP.
+
+**[▶ View Live Sample Report (Tencent / HK.00700)](https://natbrian.github.io/auto-research-finance/moomoo-dashboard/outputs/US_AAPL_2026-04-08_report.html)**
+
+![Sample report — header and price chart](docs/sample_report_01.png)
+
+---
+
+## Architecture
+
+```
+User runs /moomoo-dash HK.00700                python -m src.orchestrator HK.00700
+          │                                                  │
+          ▼                                                  │
+    Claude Code (skill orchestration)                        │
+          │                                                  │
+    ┌─────┴──────────────────────────┐                       │
+    │                                │                       │
+    ▼                                ▼                       │
+moomoo_server              financials_server                 │
+(MooMoo OpenD,             (yfinance: fundamentals,          │
+ yfinance fallback)         earnings, peers, performance)    │
+    │                                │                       │
+    └──────────┬─────────────────────┘                       │
+               │                                             │
+               ▼                                             │
+    news_sentiment_server                                    │
+    (yfinance news + keyword scoring)                        │
+               │                                             │
+               └─────────────────┬───────────────────────────┘
+                                 ▼
+                  src/technical_indicators.py
+                  (RSI, MACD, Bollinger, SMA, Stochastic)
+                                 │
+                                 ▼
+                  src/report_generator.py
+                  (Jinja2 + Plotly → single HTML)
+                                 │
+                                 ▼
+                  outputs/{TICKER}_{date}_report.html
+```
+
+The same data → analysis → report pipeline runs through two entry points: a Claude Code skill (`/moomoo-dash`) that orchestrates the three MCP servers via tool use, and a CLI orchestrator (`python -m src.orchestrator`) that talks to MooMoo OpenD and yfinance directly with no LLM in the loop.
+
+---
+
+## Notable design choices
+
+- **Two execution modes**: the same pipeline runs both as a Claude Code skill (via MCP) and as a standalone CLI (`python -m src.orchestrator`). The CLI path keeps the system testable and debuggable without an LLM in the loop, and lets the report generator be reused outside agent contexts.
+- **Graceful degradation with source tagging**: MooMoo OpenAPI is the primary market-data source, but US equities and several plate APIs require paid market rights. When MooMoo returns a permission error (`"no right"`, `"quota"`, `"subscription"`, …) or is unreachable, every relevant tool transparently falls back to yfinance, and every response carries a `"source": "moomoo" | "yfinance" | "moomoo_only"` field so the data origin remains inspectable downstream.
+- **Three MCP servers, separated by responsibility**: market data, fundamentals, news + sentiment — each kept thin and composable rather than rolled into one monolithic server. Servers register through `.claude.json`; skills declare which servers they need via `allowed-tools`.
+
+The Claude Code skill (`.claude/skills/moomoo-dash/SKILL.md`) acts as an **agent specification** describing the role, the tool-call sequence, the branching logic between data sources, and the error-handling table — making the agent's behavior auditable in version control, expressed as structured procedure rather than ad-hoc prompt strings.
 
 ---
 
@@ -12,60 +65,30 @@ Input a ticker → get a comprehensive interactive HTML dashboard with real-time
 | Requirement | Notes |
 |---|---|
 | Python 3.10+ | Required for type hints and pandas 2.x |
-| Claude Code CLI | Required to use the `/moomoo-dash` skill |
-| [MooMoo OpenD](https://www.moomoo.com/download/OpenAPI) | Local gateway for real-time data — must be running |
-| MooMoo Account | Free account provides HK LV1 market data |
+| Claude Code CLI | Required only for skill mode (`/moomoo-dash`) |
+| [MooMoo OpenD](https://www.moomoo.com/download/OpenAPI) | Local gateway for real-time data; optional — system falls back to yfinance |
+| MooMoo Account | Optional. Free account provides HK LV1 data |
 
-> **Market data access & automatic fallback:**  
-> HK stocks (LV1) are available on a **free** MooMoo account.  
-> US stocks require a **paid subscription** or qualifying account balance.  
-> **When MooMoo returns a permission error or is unreachable, the system
-> automatically falls back to yfinance** for snapshot and K-line data — no
-> configuration needed.  A `"source"` field in every response indicates whether
-> data came from `"moomoo"` or `"yfinance"`.  
-> The demo and all defaults use `HK.00700` (Tencent) which works on free accounts.
+> **No setup required to view a sample.** Run `python scripts/generate_sample_report.py` to produce a complete report from canned data — useful for evaluating the project without any API access.
 
 ### Install
 
 ```bash
-cd moomoo-dashboard
+git clone https://github.com/nabeofchanKo/equity-research-agent.git
+cd equity-research-agent
 pip install -r requirements.txt
 ```
 
-### Start MooMoo OpenD
-
-1. Download from [moomoo.com/download/OpenAPI](https://www.moomoo.com/download/OpenAPI)
-2. Install, launch, and log in with your MooMoo account
-3. OpenD listens on `127.0.0.1:11111` by default (configurable in `config/settings.yaml`)
-
----
-
-## Two Ways to Generate Reports
-
-### Method 1 — Claude Code Skill (recommended)
+### View a sample report (no API access needed)
 
 ```bash
-cd moomoo-dashboard
-claude
+python scripts/generate_sample_report.py
+# → opens outputs/SAMPLE_HK_00700_report.html
 ```
 
-Then inside Claude Code:
-
-```
-/moomoo-dash HK.00700       # Full equity research report
-/moomoo-dash 00700          # Same — HK prefix inferred from numeric code
-/moomoo-dash US.AAPL        # US stock (requires paid data rights)
-
-/moomoo-quote HK.00700      # Quick price + key metrics (text only)
-/moomoo-sector HK.00700     # Sector peer comparison table
-```
-
-The skill calls the three MCP servers via Claude's tool-use protocol, runs analysis, and generates `outputs/{TICKER}_{date}_report.html`.
-
-### Method 2 — Command Line (standalone, no Claude needed)
+### Method 1 — Standalone CLI (no Claude, no MCP)
 
 ```bash
-# Single command — runs the full pipeline and writes the HTML report
 python -m src.orchestrator HK.00700
 python -m src.orchestrator US.AAPL
 python -m src.orchestrator NVDA          # US prefix inferred from non-numeric code
@@ -75,20 +98,31 @@ python -m src.orchestrator 00700         # HK prefix inferred from numeric code
 python -m src.orchestrator HK.00700 --output-dir ./my-reports
 ```
 
-The orchestrator connects to OpenD and yfinance directly — no MCP or Claude required.
-If MooMoo is unavailable or returns a permission error, the orchestrator falls back
-to yfinance automatically and continues generating the report.
+The orchestrator connects to OpenD and yfinance directly. If MooMoo is unavailable or returns a permission error, it falls back to yfinance automatically and continues generating the report.
 
-### View the sample report (no OpenD required)
+### Method 2 — Claude Code skill (agent mode)
 
 ```bash
-python scripts/generate_sample_report.py
-# Opens outputs/SAMPLE_HK.00700_report.html
+cd equity-research-agent
+claude
 ```
+
+Then inside Claude Code:
+
+```
+/moomoo-dash HK.00700       # Full equity research report
+/moomoo-dash 00700          # HK prefix inferred from numeric code
+/moomoo-dash US.AAPL        # US stock (requires paid MooMoo data rights or yfinance fallback)
+
+/moomoo-quote HK.00700      # Quick price + key metrics (text only)
+/moomoo-sector HK.00700     # Sector peer comparison table
+```
+
+The skill calls the three MCP servers via Claude's tool-use protocol, runs analysis, and writes `outputs/{TICKER}_{date}_report.html`.
 
 ---
 
-## Report Sections
+## What the report contains
 
 The generated single-file HTML report includes 8 interactive sections:
 
@@ -103,15 +137,7 @@ The generated single-file HTML report includes 8 interactive sections:
 | 6 | **Performance Benchmark** | Stock vs ^HSI (HK) or SPY (US) over 1M / 3M / 6M / 1Y |
 | 7 | **Sentiment & News** | Sentiment gauge + recent headlines with per-article scores |
 
----
-
-## Sample Report
-
-A generated report covers 8 sections in a single self-contained HTML file: a header with price and signal gauge, an interactive candlestick chart with SMA / Bollinger Bands / volume, technical indicator panels (RSI, MACD, Stochastic), fundamentals with a quarterly earnings chart, a peer sector comparison table, an indexed sector relative-performance line chart, a benchmark performance table (1M / 3M / 6M / 1Y), and a sentiment gauge with recent news headlines.
-
-**[View Sample Live Report →](https://natbrian.github.io/auto-research-finance/moomoo-dashboard/outputs/US_AAPL_2026-04-08_report.html)**
-
-The screenshots below are taken from a sample report generated for **HK.00700 (Tencent Holdings)**.
+Screenshots from a sample report generated for **HK.00700 (Tencent Holdings)**:
 
 ![Sample report 1](docs/sample_report_01.png)
 ![Sample report 2](docs/sample_report_02.png)
@@ -127,9 +153,7 @@ Three MCP servers expose data as tools. They are registered in `.claude.json` an
 
 ### `moomoo_server` — Real-time market data
 
-Connects to MooMoo OpenD gateway. Provides live quotes, candlestick data, and sector/plate information.
-**Automatically falls back to yfinance** when MooMoo returns a permission error or connection error.
-Every response includes a `"source"` field: `"moomoo"`, `"yfinance"`, or `"moomoo_only"`.
+Connects to MooMoo OpenD gateway. Provides live quotes, candlestick data, and sector/plate information. **Automatically falls back to yfinance** when MooMoo returns a permission error or connection error. Every response includes a `"source"` field: `"moomoo"`, `"yfinance"`, or `"moomoo_only"`.
 
 | Tool | MooMoo fallback | Description |
 |---|---|---|
@@ -153,7 +177,7 @@ Uses yfinance (Yahoo Finance). Works for both HK and US stocks.
 
 ### `news_sentiment_server` — News & sentiment
 
-Uses yfinance news feed + keyword-based sentiment scoring.
+Uses yfinance news feed + keyword-based sentiment scoring (intentionally simple — not an NLP model).
 
 | Tool | Description |
 |---|---|
@@ -164,6 +188,8 @@ Uses yfinance news feed + keyword-based sentiment scoring.
 
 ## Skills
 
+Each skill is a markdown file under `.claude/skills/` declaring role, allowed tools, input contract, step-by-step workflow, data-source fallback table, and error-handling rules. The skill files double as the agent's specification — diffable in Git, reviewable in PRs.
+
 | Skill | Command | Description | Tools used |
 |---|---|---|---|
 | `moomoo-dash` | `/moomoo-dash <TICKER>` | Full equity research report (HTML) | All 3 servers |
@@ -172,39 +198,44 @@ Uses yfinance news feed + keyword-based sentiment scoring.
 
 ---
 
-## Architecture
+## Project Structure
 
 ```
-User runs /moomoo-dash HK.00700
-          │
-          ▼
-    Claude Code (skill orchestration)
-          │
-    ┌─────┴──────────────────────────┐
-    │                                │
-    ▼                                ▼
-moomoo_server              financials_server
-(MooMoo OpenD)             (yfinance / Yahoo)
-    │                                │
-    │  snapshot, kline,              │  fundamentals, earnings,
-    │  plates, peers                 │  performance, peer comparison
-    │                                │
-    └──────────┬─────────────────────┘
-               │
-               ▼
-    news_sentiment_server
-    (yfinance news + keyword scoring)
-               │
-               ▼
-    src/technical_indicators.py
-    (RSI, MACD, Bollinger, SMA, Stochastic)
-               │
-               ▼
-    src/report_generator.py
-    (Jinja2 + Plotly → single HTML)
-               │
-               ▼
-    outputs/{TICKER}_{date}_report.html
+equity-research-agent/
+├── README.md
+├── requirements.txt
+├── setup.py
+├── pytest.ini
+├── .claude.json                    ← MCP server registration
+├── config/settings.yaml
+├── mcp_servers/
+│   ├── moomoo_server/server.py     ← 6 MooMoo tools
+│   ├── financials_server/server.py ← 4 yfinance tools
+│   └── news_sentiment_server/server.py ← 2 sentiment tools
+├── src/
+│   ├── technical_indicators.py     ← RSI/MACD/BB/Stoch/SMA
+│   ├── sector_mapper.py            ← Ticker format conversion + peer lookup
+│   ├── report_generator.py         ← Jinja2 + Plotly HTML report
+│   ├── orchestrator.py             ← CLI pipeline (no MCP needed)
+│   └── utils.py
+├── templates/report.html           ← Dark-theme Jinja2 template
+├── scripts/
+│   └── generate_sample_report.py   ← Generates outputs/SAMPLE_*.html
+├── outputs/
+│   └── SAMPLE_HK_00700_report.html ← Pre-generated sample
+├── tests/
+│   ├── test_utils.py
+│   ├── test_technical_indicators.py
+│   ├── test_sector_mapper.py
+│   ├── test_financials_server.py
+│   ├── test_moomoo_server.py
+│   ├── test_report_generator.py
+│   └── test_integration.py         ← @pytest.mark.integration
+└── .claude/
+    └── skills/
+        ├── moomoo-dash/SKILL.md
+        ├── moomoo-quote/SKILL.md
+        └── moomoo-sector/SKILL.md
 ```
 
 ---
@@ -234,49 +265,9 @@ sentiment:
 
 ---
 
-## Project Structure
-
-```
-moomoo-dashboard/
-├── README.md
-├── requirements.txt
-├── setup.py
-├── pytest.ini
-├── .claude.json                    ← MCP server registration
-├── config/settings.yaml
-├── mcp_servers/
-│   ├── moomoo_server/server.py     ← 6 MooMoo tools
-│   ├── financials_server/server.py ← 4 yfinance tools
-│   └── news_sentiment_server/server.py ← 2 sentiment tools
-├── src/
-│   ├── technical_indicators.py     ← RSI/MACD/BB/Stoch/SMA
-│   ├── sector_mapper.py            ← Ticker format conversion + peer lookup
-│   ├── report_generator.py         ← Jinja2 + Plotly HTML report
-│   ├── orchestrator.py             ← CLI pipeline (no MCP needed)
-│   └── utils.py
-├── templates/report.html           ← Dark-theme Jinja2 template
-├── scripts/
-│   └── generate_sample_report.py  ← Generates outputs/SAMPLE_*.html
-├── outputs/
-│   └── SAMPLE_HK.00700_report.html ← Pre-generated sample
-├── tests/
-│   ├── test_utils.py
-│   ├── test_technical_indicators.py
-│   ├── test_sector_mapper.py
-│   ├── test_financials_server.py
-│   ├── test_moomoo_server.py
-│   ├── test_report_generator.py
-│   └── test_integration.py         ← @pytest.mark.integration
-└── .claude/
-    └── skills/
-        ├── moomoo-dash/SKILL.md
-        ├── moomoo-quote/SKILL.md
-        └── moomoo-sector/SKILL.md
-```
-
----
-
 ## Running Tests
+
+Unit and integration tests are separated by pytest marker so unit tests run with no network or external services.
 
 ```bash
 # Unit tests only (no OpenD, no internet required)
@@ -296,11 +287,28 @@ pytest tests/test_report_generator.py -q
 
 | Layer | Technology | Purpose |
 |---|---|---|
+| Agent harness | Claude Code | Skill orchestration, tool-use protocol |
+| MCP framework | mcp Python SDK (FastMCP) | Tool server protocol |
 | Market data | moomoo-api (Python SDK) | Real-time quotes, K-line, sector plates |
 | Fundamentals | yfinance | P/E, ROE, earnings, peer data |
 | Analysis | pandas, numpy | Technical indicator computation |
 | Charts | Plotly | Interactive embedded charts |
 | Templating | Jinja2 | HTML report generation |
 | Sentiment | yfinance news + keyword scoring | News retrieval + scoring |
-| MCP | mcp Python SDK (FastMCP) | Tool server protocol |
-| Testing | pytest | Unit + integration tests |
+| Testing | pytest | Unit + integration tests (separated by marker) |
+
+---
+
+## Project Context
+
+This repository began as a subproject of **CA6115 (NTU MSc Applied AI)** — a team course project building Claude Code-based research tooling for finance. `equity-research-agent` (originally named `moomoo-dashboard`) was my solo subproject within that course, and this repository extracts it for standalone use with full commit history preserved via `git filter-repo`.
+
+The original team repository, which contains three other complementary projects by other team members (a paper-to-factor pipeline, a multi-agent trading system, and an alternate stock-insight reporter), is at [auto-research-finance](https://github.com/NatBrian/auto-research-finance).
+
+The framing for the work overall is **harness engineering**: the LLM (via Claude Code) handles most of the keystroke-level implementation, while design judgment — tool boundaries, fallback strategy, state contracts, scoring rules, test layering, and review/correction loops — is owned by the engineer outside the model. The skill files under `.claude/skills/` are written as agent specifications precisely so this design surface is explicit and reviewable.
+
+---
+
+## Disclaimer
+
+This system is for **research and educational purposes only**. It is not financial advice. Past performance does not guarantee future results.
