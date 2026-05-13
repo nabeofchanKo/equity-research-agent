@@ -1,0 +1,5 @@
+# Generated/sample HTML reports — exclude from language statistics
+outputs/*.html linguist-generated=true
+
+# Jinja2 templates — documentation, not the primary language
+templates/*.html linguist-documentation=true
