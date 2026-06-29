@@ -4,7 +4,7 @@
 
 An **MCP-based equity research agent**. Input a ticker → an orchestrated pipeline calls three MCP servers (market data, fundamentals, news + sentiment), runs technical analysis, and produces an 8-section interactive HTML research report. Built as a Claude Code skill, with a parallel standalone CLI mode that runs the full pipeline without Claude or MCP.
 
-**[▶ View Live Sample Report (Tencent / HK.00700)](https://natbrian.github.io/auto-research-finance/moomoo-dashboard/outputs/US_AAPL_2026-04-08_report.html)**
+**[▶ View Live Sample Report (Tencent / HK.00700)](https://nabeofchanKo.github.io/equity-research-agent/outputs/SAMPLE_HK_00700_report.html)**
 
 ![Sample report — header and price chart](docs/sample_report_01.png)
 
