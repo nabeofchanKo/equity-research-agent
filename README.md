@@ -1,5 +1,10 @@
 # equity-research-agent
 
+> **概要（日本語）**
+> 銘柄コードを1つ入力すると、株価・財務・ニュースを3つのデータ取得サーバー（MCP）から集め、テクニカル分析を加えて、8つのセクションからなるHTMLの株式リサーチレポートを自動で作るエージェントです。
+> Claude Code のスキルとして動き、同じ処理を LLM なしで実行できるコマンドライン版も用意しています。データ取得元が使えないときは自動で別の取得元に切り替え、各データの出どころを記録します。
+> NTU（南洋理工大学）修士課程の授業のチームプロジェクトのうち、作者が1人で担当した部分を独立させたリポジトリです。
+
 *NTU MSc Applied AI · CA6115 course project · solo subproject*
 
 An **MCP-based equity research agent**. Input a ticker → an orchestrated pipeline calls three MCP servers (market data, fundamentals, news + sentiment), runs technical analysis, and produces an 8-section interactive HTML research report. Built as a Claude Code skill, with a parallel standalone CLI mode that runs the full pipeline without Claude or MCP.
@@ -299,13 +304,21 @@ pytest tests/test_report_generator.py -q
 
 ---
 
+## 作り方
+
+**きっかけ**: NTU の授業（CA6115）で「Claude Code を使った金融向けリサーチツール」をチームで作ることになり、その中で個人の担当として株式リサーチエージェントを作った。金融・株価データは規制が厳しく、誤った数字や出どころのわからない情報が許されない領域なので、信頼性と出力の質を重視したかった。一方で、LLM に銘柄分析をそのまま任せると、どのデータを根拠にしたのか、取得に失敗したとき何が起きたのかが見えにくくなる。そこで、モデルに任せる部分と人が設計して固定する部分を分ける、いわゆる**ハーネス設計**を意識して作ることにした。ハーネス設計とは、LLM そのものではなく、LLM に使わせるツール、手順、失敗時の挙動、検証の仕組みを設計することを指す。
+
+**役割分担**: 課題設定（金融リサーチエージェントを、ハーネス設計を意識して作ること）は作者が行った。設計（データ取得サーバーの分け方、取得失敗時の切り替えと出どころの記録、手順書としてのスキルファイルの書き方、テストの分け方）と評価（出力レポートの数値や表示が妥当か、切り替えが想定どおりに動くか）は、AI（Claude Code）との壁打ちで検討し、採否は作者が判断した。実装・テストコード・文書の下書きには AI コーディング支援を使った。
+
+---
+
 ## Project Context
 
 This repository began as a subproject of **CA6115 (NTU MSc Applied AI)** — a team course project building Claude Code-based research tooling for finance. `equity-research-agent` (originally named `moomoo-dashboard`) was my solo subproject within that course, and this repository extracts it for standalone use with full commit history preserved via `git filter-repo`.
 
 The original team repository, which contains three other complementary projects by other team members (a paper-to-factor pipeline, a multi-agent trading system, and an alternate stock-insight reporter), is at [auto-research-finance](https://github.com/NatBrian/auto-research-finance).
 
-The framing for the work overall is **harness engineering**: the LLM (via Claude Code) handles most of the keystroke-level implementation, while design judgment — tool boundaries, fallback strategy, state contracts, scoring rules, test layering, and review/correction loops — is owned by the engineer outside the model. The skill files under `.claude/skills/` are written as agent specifications precisely so this design surface is explicit and reviewable.
+The framing for the work overall is **harness engineering**. Finance is a heavily regulated domain where a wrong number or an untraceable data source is not acceptable, so the priority was reliability and output quality. Rather than tuning the model itself, the work is in designing what surrounds it: tool boundaries, fallback strategy, state contracts, scoring rules, test layering, and review/correction loops. I set the problem. Design and evaluation were worked through in discussion with Claude Code, and I made the final call on each decision. Implementation used AI coding assistance. The skill files under `.claude/skills/` are written as agent specifications precisely so this design surface is explicit and reviewable.
 
 ---
 
